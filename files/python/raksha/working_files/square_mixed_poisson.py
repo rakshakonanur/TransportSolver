@@ -14,9 +14,6 @@ from ufl import (Measure, SpatialCoordinate, TestFunctions, TrialFunctions,
     https://docs.fenicsproject.org/dolfinx/v0.7.2/python/demos/demo_mixed-poisson.html
 """
 
-
-
-
 domain = mesh.create_unit_square(MPI.COMM_WORLD, 32, 32, mesh.CellType.quadrilateral)
 
 k = 1

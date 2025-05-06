@@ -1,0 +1,3 @@
+# Ignore Python cache
+./files/python/raksha/__pycache__/
+./files/python/raksha/.cache/

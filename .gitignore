@@ -1,3 +1,9 @@
 # Ignore Python cache
 /files/python/raksha/__pycache__/
 /files/python/raksha/.cache/
+
+# Ignore library files
+/files/libs/sklearn-env/
+
+# Ignore Miniconda linux installation
+Miniconda3-latest-Linux-x86_64.sh

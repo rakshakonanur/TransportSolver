@@ -29,14 +29,15 @@ class TransportSolver:
         self.D_value = 1e-3
         self.element_degree = 1
         self.write_output = write_output
-        self.N = int((10* u_val * L) / (2 * self.D_value)) # Number of mesh cells: based on stability criterion of grid Pe
+        # self.N = int((10* u_val * L) / (2 * self.D_value)) # Number of mesh cells: based on stability criterion of grid Pe
+        self.N = 10
         self.c_val = c_val
         self.mesh = create_interval(MPI.COMM_WORLD, self.N, [0.0, L])
         self.mesh_tagging()
 
         # Temporal parameters
-        self.T = 10
-        self.dt = .1
+        self.T = 1000
+        self.dt = 1
         self.t = 0
         self.num_timesteps = int(self.T / self.dt)
 
@@ -101,16 +102,20 @@ class TransportSolver:
 
         # === Boundary conditions ===
 
-        # self.bc_left_func = Function(self.W)
-        # self.bc_left_func.x.array[:] = self.c_val 
+        self.bc_left_func = Function(self.W)
+        self.bc_left_func.x.array[:] = self.c_val 
 
-        # dof_left = locate_dofs_geometrical(self.W, lambda x: np.isclose(x[0], 0.0))
-        # self.bcs = [dirichletbc(self.bc_left_func, dof_left)]
+        dof_left = locate_dofs_geometrical(self.W, lambda x: np.isclose(x[0], 0.0))
+        self.bcs = [dirichletbc(self.bc_left_func, dof_left)]
 
-        # For constant boundary condition
-        self.bc_left = Constant(self.mesh, dfx.default_scalar_type(self.c_val[0]))
-        self.dof_left = locate_dofs_geometrical(self.W, lambda x: np.isclose(x[0], 0.0))
-        self.bcs = [dirichletbc(self.bc_left, self.dof_left, self.W)]  # Only apply at inlet
+        # # For constant boundary condition
+        # self.bc_left = Constant(self.mesh, dfx.default_scalar_type(self.c_val[0]))
+        # self.dof_left = locate_dofs_geometrical(self.W, lambda x: np.isclose(x[0], 0.0))
+        # # self.bcs = [dirichletbc(self.bc_left, self.dof_left, self.W)]  # Only apply at inlet
+
+        # self.bc_right = Constant(self.mesh, dfx.default_scalar_type(0.0))
+        # self.dof_right = locate_dofs_geometrical(self.W, lambda x: np.isclose(x[0], self.L))
+        # self.bcs = [dirichletbc(self.bc_left, self.dof_left, self.W), dirichletbc(self.bc_right, self.dof_right, self.W)]  # Only apply at inlet
 
         # === Variational Form ===
         un = (dot(u, n) + abs(dot(u, n))) / 2.0
@@ -224,9 +229,15 @@ class TransportSolver:
         
 
         ani = FuncAnimation(fig, update, frames=len(self.snapshots), interval=10, blit=False, repeat=False)
-        plt.plot(self.c_h.function_space.tabulate_dof_coordinates()[:, 0], self.c_h.x.array)
+        # c_true = ((np.exp(self.u_val * self.x_coords) / self.D_value) - np.exp((self.u_val * self.L) / self.D_value)) / (1 - np.exp((self.u_val * self.L) / self.D_value))
+        Pe = self.u_val / self.D_value
+        c_true = (np.exp(Pe * self.x_coords) - np.exp(Pe * self.L)) / (1 - np.exp(Pe * self.L))
+        plt.plot(self.x_coords, c_true, label="Analytical solution")
+        # plt.plot(self.c_h.function_space.tabulate_dof_coordinates()[:, 0], self.c_h.x.array)
+        plt.legend()
         plt.show()
-        ani.save("raksha_steady_0.01_t10.mp4", writer="ffmpeg", fps=20)
+
+        # ani.save("raksha_steady_0.01_t10.mp4", writer="ffmpeg", fps=20)
         return self.snapshots, self.time_values
 
 
@@ -241,7 +252,7 @@ if __name__ == '__main__':
 
     # Create transport solver object
     transport_sim = TransportSolver(L=L,
-                                    c_val=np.full(100, 1.0),
+                                    c_val=np.full(1000, 1.0),
                                     # c_val=np.linspace(1, 1.5, 100),
                                     u_val=u_val,
                                     element_degree=k,

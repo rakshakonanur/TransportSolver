@@ -36,8 +36,8 @@ class TransportSolver:
         self.mesh_tagging()
 
         # Temporal parameters
-        self.T = 1000
-        self.dt = 1
+        self.T = 10
+        self.dt = 0.1
         self.t = 0
         self.num_timesteps = int(self.T / self.dt)
 

@@ -7,3 +7,11 @@
 
 # Ignore Miniconda linux installation
 Miniconda3-latest-Linux-x86_64.sh
+
+# Ignore the bifurcation sim files
+/files/python/raksha/working_files/test_bifurcation/bifurcation.h5
+/files/python/raksha/working_files/test_bifurcation/bifurcation.msh
+/files/python/raksha/working_files/test_bifurcation/bifurcation.xdmf
+/files/python/raksha/working_files/test_bifurcation/before.vtu
+/files/python/raksha/working_files/test_bifurcation/after.vtu
+/files/python/raksha/working_files/test_bifurcation/output/

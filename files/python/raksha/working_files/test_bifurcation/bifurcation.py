@@ -1,7 +1,7 @@
 from dolfinx.io import XDMFFile
 from mpi4py import MPI
 
-from ufl import dot, grad, jump
+from ufl import dot, grad, jump, inner
 from petsc4py import PETSc
 from dolfinx.fem import FunctionSpace, dirichletbc, locate_dofs_geometrical, Function
 from dolfinx.fem.petsc import LinearProblem
@@ -17,6 +17,7 @@ import meshio
 import vtk
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from dataclasses import dataclass
 
 class Bifurcation:
 
@@ -40,7 +41,7 @@ class Bifurcation:
         self.mesh_tagging()
 
         # Temporal parameters
-        self.T = 20
+        self.T = 100
         self.dt = .2
         self.t = 0
         self.num_timesteps = int(self.T / self.dt)
@@ -142,6 +143,8 @@ class Bifurcation:
                 - D is diffusion coefficient
                 - f is a source term
         '''
+        fdim = self.mesh.topology.dim - 1
+
         # Facet normal and integral measures
         n  = ufl.FacetNormal(self.mesh)
         # self.dx = ufl.Measure('dx', domain=self.mesh) # Cell integrals
@@ -175,36 +178,76 @@ class Bifurcation:
         beta = Constant(self.mesh, dfx.default_scalar_type(10.0))
         hf = ufl.CellDiameter(self.mesh)
 
+        # Surrounding concentration term:
+        u_ex = lambda x: 1 + 0.0000001 *x[0] #x[0]**2 + 2*x[1]**2  
+        x = ufl.SpatialCoordinate(self.mesh)
+        s = u_ex(x) # models the surrounding concentration
+        r = Constant(self.mesh, dfx.default_scalar_type(10)) # for heat transfer, models the heat transfer coefficient
+        g = dot(n, grad(u_ex(x))) # corresponding to the Neumann BC
 
         print("Total number of dofs: ", self.W.dofmap.index_map.size_global, flush=True)
 
         # === Boundary conditions ===
+        def BoundaryConditionData(bc_type, marker, values):
+            if bc_type == "Dirichlet":
+                self.bc_func = Function(self.W)
+                self.bc_func.x.array[:] = values
+                dofs = self.facet_tag.find(marker)
+                bc = dirichletbc(self.bc_func, dofs)
 
-        self.bc_left_func = Function(self.W)
-        self.bc_left_func.x.array[:] = self.c_val[self.t] 
+                # # For functions only
+                # u_D = Function(self.W)
+                # u_D.interpolate(values) 
 
-        self.dof_left = locate_dofs_geometrical(self.W, lambda x: np.isclose(x[0], 0.0))
-        self.bcs = [dirichletbc(self.bc_left_func, self.dof_left)]
+                # dofs = self.facet_tag.find(marker)
+                # bc = dirichletbc(u_D, dofs)
+                return bc, "Dirichlet", None, None
+            elif bc_type == "Neumann":
+                L_neumann = inner(values, w) * ds(marker)
+                return None, "Neumann", None, L_neumann
+            elif bc_type == "Robin":
+                r_val, s_val = values
+                a_robin = r_val * inner(c, w) * ds(marker)
+                L_robin = r_val * inner(s_val, w) * ds(marker)
+                return None, "Robin", a_robin, L_robin
+            else:
+                raise TypeError(f"Unknown boundary condition: {bc_type}")
 
-        # # # For constant boundary condition
-        # self.bc_left = Constant(self.mesh, dfx.default_scalar_type(self.c_val[0]))
-        # self.dof_left = locate_dofs_geometrical(self.W, lambda x: np.isclose(x[0], 0.0))
-        # # self.bcs = [dirichletbc(self.bc_left, self.dof_left, self.W)]  # Only apply at inlet
-        # self.bcs = [dirichletbc(self.bc_left, self.dof_left, self.W)]  # Only apply at inlet
+        # Define the Dirichlet and Robin conditions
+        bcs_raw = [
+            ("Dirichlet", 1, self.c_val[self.t]),
+             ("Robin", 2, (r, s)),
+            # ("Neumann",2, g)
+        ]
 
+        boundary_conditions = []
+        bc_types = []
+        robin_a_terms = []
+        robin_L_terms = []
 
-        # === Variational Form ===
-        # un = (dot(u, n) + abs(dot(u, n))) / 2.0
+        for bc_type_name, marker, values in bcs_raw:
+            bc, bctype, a_extra, L_extra = BoundaryConditionData(bc_type_name, marker, values)
+            bc_types.append(bctype)
+            if bc is not None:
+                boundary_conditions.append(bc)
+            if a_extra is not None:
+                robin_a_terms.append(a_extra)
+            if L_extra is not None:
+                robin_L_terms.append(L_extra)
 
+        # Variational forms
         a_time     = c * w / deltaT * ufl.dx
         a_advect   = dot(u, grad(c)) * w * ufl.dx
         a_diffuse  = dot(grad(c), grad(w)) * D * ufl.dx
 
-        a = a_time + a_advect + a_diffuse
-        L = (self.c_ / deltaT + f) * w * ufl.dx
+        a = a_time + a_advect + a_diffuse + sum(robin_a_terms)
+        L = (self.c_ / deltaT + f) * w * ufl.dx + sum(robin_L_terms)
 
         self.a_cpp = form(a)
         self.L_cpp = form(L)
+
+        # Apply Dirichlet BCs
+        self.bcs = boundary_conditions
 
         # Create output function in P1 space
         self.c_out = dfx.fem.Function(dfx.fem.functionspace(self.mesh, Pk))
@@ -268,9 +311,9 @@ class Bifurcation:
             # Get x positions once (only for Lagrange P1 elements in 1D)
             self.x_coords = self.c_h.function_space.tabulate_dof_coordinates()[:, 0]
 
-            val = self.c_val[_-1]
+            val = self.c_val[_ - 1] if _ > 0 else self.c_val[0] # updates the inlet condition every time step
             self.bc_left = val
-            self.bcs = [dirichletbc(self.bc_left, self.dof_left, self.W)]  # Only apply at inle
+            self.bcs = [dirichletbc(self.bc_left, self.facet_tag.find(1), self.W)]  # Only apply at inle
 
             self.assemble_transport_RHS()
 
@@ -312,8 +355,6 @@ class Bifurcation:
             ax.set_title(f"Time: {self.time_values[frame]:2.2f}")
             return line,
         
-        
-
         ani = FuncAnimation(fig, update, frames=len(self.snapshots), interval=10, blit=False, repeat=False)
         # c_true = ((np.exp(self.u_val * self.x_coords) / self.D_value) - np.exp((self.u_val * self.L) / self.D_value)) / (1 - np.exp((self.u_val * self.L) / self.D_value))
         # Pe = self.u_val / self.D_value
@@ -333,14 +374,36 @@ if __name__ == '__main__':
     comm = MPI.COMM_WORLD # MPI communicator
     write_output = True
     L = 1.0
-    u_val = 0.1 # Velocity value
+    u_val = 0.5 # Velocity value
     k = 1 # Finite element polynomial degree
 
     # Create transport solver object
-    transport_sim = Bifurcation(#c_val=np.full(100, 1.0),
-                                    c_val=np.linspace(1, 1, 100),
+    transport_sim = Bifurcation(c_val=np.full(500, 1.0),
+                                    # c_val=np.linspace(1, 1.5, 100),
                                     u_val=u_val,
                                     element_degree=k,
                                     write_output=write_output)
     transport_sim.setup()
     transport_sim.run()
+
+
+# # Dirichlet BC for the inlet
+
+        # self.bc_left_func = Function(self.W)
+        # self.bc_left_func.x.array[:] = self.c_val[self.t] 
+
+        # self.dof_left = locate_dofs_geometrical(self.W, lambda x: np.isclose(x[0], 0.0))
+        # self.bcs = [dirichletbc(self.bc_left_func, self.dof_left)]
+
+        # Robin BC for the outlet
+        # self.bc_right = r * inner(u-s, w)* ds(2)
+
+        # # # For constant boundary condition
+        # self.bc_left = Constant(self.mesh, dfx.default_scalar_type(self.c_val[0]))
+        # self.dof_left = locate_dofs_geometrical(self.W, lambda x: np.isclose(x[0], 0.0))
+        # # self.bcs = [dirichletbc(self.bc_left, self.dof_left, self.W)]  # Only apply at inlet
+        # self.bcs = [dirichletbc(self.bc_left, self.dof_left, self.W)]  # Only apply at inlet
+
+
+        # === Variational Form ===
+        # un = (dot(u, n) + abs(dot(u, n))) / 2.0

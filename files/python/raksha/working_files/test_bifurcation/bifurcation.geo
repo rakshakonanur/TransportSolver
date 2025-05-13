@@ -14,9 +14,9 @@ Line(2) = {2, 3}; // Upward branch
 Line(3) = {2, 4}; // Downward branch
 
 // Assign a fixed number of elements per line (e.g., 10)
-Transfinite Line{1} = 100;
-Transfinite Line{2} = 100;
-Transfinite Line{3} = 100;
+Transfinite Line{1} = 1000;
+Transfinite Line{2} = 1000;
+Transfinite Line{3} = 1000;
 
 // Save as line elements (1D)
 Physical Line(1) = {1};

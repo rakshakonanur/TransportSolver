@@ -26,6 +26,7 @@ Miniconda3-latest-Linux-x86_64.sh
 
 # Ignore SSCP training files
 /files/python/SSCP_lectures/
+/files/python/raksha/working_files/test_perfusion/__pycache__/
 
 # Ignore the large files
 /files/python/raksha/working_files/test_full_model/bifurcation.h5

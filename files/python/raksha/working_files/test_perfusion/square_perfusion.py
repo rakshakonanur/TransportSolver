@@ -14,6 +14,8 @@ from dolfinx.fem.petsc import assemble_matrix, create_vector, assemble_vector, s
 from ufl import (FacetNormal, Identity, Measure, TestFunctions, TrialFunctions, exp, div, inner, SpatialCoordinate,
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system)
 from typing import List, Optional
+from projector import Projector
+from dolfinx.io import XDMFFile
 
 """
     From the DOLFINx tutorial: Mixed formulation of the Poisson equation
@@ -21,6 +23,12 @@ from typing import List, Optional
 
     More tutorials: https://github.com/Simula-SSCP/SSCP_lectures/
 
+    References for the projector: 
+        https://github.com/michalhabera/dolfiny/blob/202e43711c54bb5d376a6e622e0bc896a20102dd/src/dolfiny/projection.py#L8-L48
+        https://github.com/ComputationalPhysiology/oasisx/blob/e8e1b84af0b8675ad57090eddbcd9f08a3b2b63c/src/oasisx/function.py#L1-L124
+        https://github.com/Simula-SSCP/SSCP_lectures/blob/main/L12%20(FEniCS%20Intro)/L02_FEniCS_Diffusion.ipynb (cloned in SSCP_lectures repo)
+        hherlyng/DG_advection_diffusion.py
+          
 """
 
 print = PETSc.Sys.Print
@@ -104,7 +112,7 @@ class PerfusionSolver:
         # k = self.element_degree
         k = 1
         P_el = element("Lagrange", self.mesh.basix_cell(), k)
-        u_el = element("DG", self.mesh.basix_cell(), k-1)
+        u_el = element("DG", self.mesh.basix_cell(), k-1, shape=(self.mesh.geometry.dim,))
         dx = Measure("dx", self.mesh)
 
         # Define function spaces
@@ -144,7 +152,6 @@ class PerfusionSolver:
         try:
             # projector = Projector(f, V, bcs = [])
             p_h = problem.solve()
-            # vf = projector(-kappa_over_mu * grad(p_h) / phi)
             # fig = plt.figure()
             # im = plot(vf)
             # plt.colorbar(im, format="%.2e")
@@ -158,10 +165,62 @@ class PerfusionSolver:
 
         # sigma_h, u_h = w_h.split()
 
-        with io.XDMFFile(self.mesh.comm, "out_darcy/u.xdmf", "w") as file:
+        projector = Projector(V)
+        vel_f = projector(-kappa_over_mu * grad(p_h) / phi)
+
+        with XDMFFile(self.mesh.comm, "out_darcy/p.xdmf","w") as file:
             file.write_mesh(self.mesh)
-            file.write_function(p_h)
+            file.write_function(p_h, 0.0)
+
+        with XDMFFile(self.mesh.comm, "out_darcy/u.xdmf","w") as file:
+            file.write_mesh(self.mesh)
+            file.write_function(vel_f, 0.0)
+
+
+class Projector():
+    def __init__(self, V):
+        u = ufl.TrialFunction(V)
+        v = ufl.TestFunction(V)
+        a = inner(u, v) * ufl.dx
+        # self.V = V
+        self.u = dfx.fem.Function(V) # Create function
+        self.a_cpp = dfx.fem.form(a, jit_options=jit_parameters)
+
+    def __call__(self, f):
+        v = ufl.TestFunction(self.u.function_space)
+        L = inner(f, v) * ufl.dx
         
+        self.L_cpp = dfx.fem.form(L, jit_options=jit_parameters) # Compile form
+        self.A = assemble_matrix(self.a_cpp, bcs=[])
+        
+        self.A.assemble()
+
+        self.b = create_vector(self.L_cpp) # Create RHS vector
+
+        self.solver = PETSc.KSP().create(MPI.COMM_WORLD)
+        self.solver.setOperators(self.A)
+        self.solver.setType('preonly')
+        self.solver.getPC().setType('lu')
+        self.solver.getPC().setFactorSolverType('mumps')
+        self.solver.getPC().getFactorMatrix().setMumpsIcntl(icntl=58, ival=1) # activate symbolic factorization
+        with self.b.localForm() as b_loc: b_loc.set(0)
+
+        # Assemble vector and set BCs
+        assemble_vector(self.b, self.L_cpp)
+        # apply_lifting(self.b, [self.a_cpp], bcs = [])
+        self.b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE) # MPI communication
+        # set_bc(self.b, bcs=[])
+        
+        self.solver.solve(self.b, self.u.x.petsc_vec)
+
+        # Destroy PETSc linear algebra objects and solver
+        self.solver.destroy()
+        self.A.destroy()
+        self.b.destroy()
+
+        return self.u
+
+
 if __name__ == '__main__':
 
     comm = MPI.COMM_WORLD # MPI communicator

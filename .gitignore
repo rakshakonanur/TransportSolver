@@ -16,6 +16,11 @@ Miniconda3-latest-Linux-x86_64.sh
 /files/python/raksha/working_files/test_bifurcation/after.vtu
 /files/python/raksha/working_files/test_bifurcation/output/
 
+# Ignore perfusion sim files
+/files/python/raksha/working_files/test_perfusion/out_mixed_poisson/u.h5
+/files/python/raksha/working_files/test_perfusion/.cache/
+/files/python/raksha/working_files/test_perfusion/out_darcy/
+
 # Ignore cloned libraries
 /files/python/dolfinx-tutorial/
 

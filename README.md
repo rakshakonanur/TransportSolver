@@ -1,3 +1,3 @@
-﻿# advectionDiffusion
+﻿# TransportSolver
 
-### Implementation of advection-diffusion equations on vasculature
+### Implementation of advection-diffusion, perfusion equations on vasculature

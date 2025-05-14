@@ -456,86 +456,86 @@ class simulationInputs:
         pprint(cleaned_tree)
 
 
-        centerlineVelocity = self.centerlineVel
-        centerlineFlow = self.centerlineFlow
-        print("Centerline velocity: ", centerlineVelocity[-1])
-        # Average every 100 numbers
-        chunk_size = 101 # For 100 points per segment- will later automate this
-        self.averageVel = [] # stores the average steady state velocity for each segment
-        self.averageFlow = [] # stores the average steady state flowrate for each segment
+        # centerlineVelocity = self.centerlineVel
+        # centerlineFlow = self.centerlineFlow
+        # print("Centerline velocity: ", centerlineVelocity[-1])
+        # # Average every 100 numbers
+        # chunk_size = 101 # For 100 points per segment- will later automate this
+        # self.averageVel = [] # stores the average steady state velocity for each segment
+        # self.averageFlow = [] # stores the average steady state flowrate for each segment
 
-        for i in range(0, len(centerlineVelocity[0]), chunk_size):
-            chunkVel = centerlineVelocity[-1][i:i+chunk_size]  # Take a slice of 10 numbers
-            avgVel = sum(chunkVel) / len(chunkVel)  # Calculate the average
-            self.averageVel.append(avgVel)
-            print("Average velocity: ", avgVel)
+        # for i in range(0, len(centerlineVelocity[0]), chunk_size):
+        #     chunkVel = centerlineVelocity[-1][i:i+chunk_size]  # Take a slice of 10 numbers
+        #     avgVel = sum(chunkVel) / len(chunkVel)  # Calculate the average
+        #     self.averageVel.append(avgVel)
+        #     print("Average velocity: ", avgVel)
 
-            chunkFlow = centerlineFlow[-1][i:i+chunk_size]  # Take a slice of 10 numbers
-            avgFlow = sum(chunkFlow) / len(chunkFlow)  # Calculate the average
-            self.averageFlow.append(avgFlow)
+        #     chunkFlow = centerlineFlow[-1][i:i+chunk_size]  # Take a slice of 10 numbers
+        #     avgFlow = sum(chunkFlow) / len(chunkFlow)  # Calculate the average
+        #     self.averageFlow.append(avgFlow)
 
 
-        # Convert to Python floats and filter out -1.0: For printing only
-        clean_arr = [float(x) for x in self.averageVel]
+        # # Convert to Python floats and filter out -1.0: For printing only
+        # clean_arr = [float(x) for x in self.averageVel]
 
-        # Optionally convert to ints
-        # clean_arr = [int(x) for x in arr if x != -1.0]
+        # # Optionally convert to ints
+        # # clean_arr = [int(x) for x in arr if x != -1.0]
 
-        print(clean_arr)
+        # print(clean_arr)
 
-        concentration = []
+        # concentration = []
 
-        from collections import deque
-        self.c_val = np.full(100, 1.0)  # Initial concentration value for the root node
-        def bfs(tree, start):
-            queue = deque([(start, self.c_val)])  # Queue holds tuples: (node, c_val)
+        # from collections import deque
+        # self.c_val = np.full(100, 1.0)  # Initial concentration value for the root node
+        # def bfs(tree, start):
+        #     queue = deque([(start, self.c_val)])  # Queue holds tuples: (node, c_val)
             
-            while queue:
-                node, c_val = queue.popleft()
-                print("Visiting Segment: ", node)
+        #     while queue:
+        #         node, c_val = queue.popleft()
+        #         print("Visiting Segment: ", node)
                 
-                from advecSolver_copy import TransportSolver
-                print("Path: ", nonzero_paths[int(node)])
-                print("Average velocity: ", self.averageVel[int(node)])
-                # print("c_val: ", len(c_val)) 
-                # Create a transport solver with the c_val from the parent
-                transport_sim = TransportSolver(
-                    L=nonzero_paths[int(node)],
-                    c_val=c_val,
-                    u_val=self.averageVel[int(node)],
-                    element_degree=k,
-                    write_output=True
-                )
+        #         from advecSolver_current import TransportSolver
+        #         print("Path: ", nonzero_paths[int(node)])
+        #         print("Average velocity: ", self.averageVel[int(node)])
+        #         # print("c_val: ", len(c_val)) 
+        #         # Create a transport solver with the c_val from the parent
+        #         transport_sim = TransportSolver(
+        #             L=nonzero_paths[int(node)],
+        #             c_val=c_val,
+        #             u_val=self.averageVel[int(node)],
+        #             element_degree=k,
+        #             write_output=True
+        #         )
                 
-                transport_sim.setup()
-                snapshots, time = transport_sim.run()
-                # print("Snapshots: ", snapshots)
-                print(len([c_val[-1] for c_val in snapshots]))
-                concentration.append(snapshots)
+        #         transport_sim.setup()
+        #         snapshots, time = transport_sim.run()
+        #         # print("Snapshots: ", snapshots)
+        #         print(len([c_val[-1] for c_val in snapshots]))
+        #         concentration.append(snapshots)
 
-                # For each child, enqueue with this node's snapshots as c_val
-                for child in tree.get(node, []):
-                    queue.append((child, [c_val[-1] for c_val in snapshots])) # store only the concentration at the outlet
-            print("Concentration values: ", len(concentration))
+        #         # For each child, enqueue with this node's snapshots as c_val
+        #         for child in tree.get(node, []):
+        #             queue.append((child, [c_val[-1] for c_val in snapshots])) # store only the concentration at the outlet
+        #     print("Concentration values: ", len(concentration))
  
-        bfs(tree, 0.0)
+        # bfs(tree, 0.0)
 
-        # === Save labeled VTP at each time step ===
-        output_dir = self.inputs["output_directory"]
-        vtp_files = sorted(glob.glob(os.path.join(output_dir, "averaged*")), key=lambda x: int(re.findall(r'\d+', x)[-1]))
-        all_data = []
-        i = 0
+        # # === Save labeled VTP at each time step ===
+        # output_dir = self.inputs["output_directory"]
+        # vtp_files = sorted(glob.glob(os.path.join(output_dir, "averaged*")), key=lambda x: int(re.findall(r'\d+', x)[-1]))
+        # all_data = []
+        # i = 0
 
-        def bf_append(tree, start):
-            queue = deque([start])  # Queue holds tuples: (node, c_val)
+        # def bf_append(tree, start):
+        #     queue = deque([start])  # Queue holds tuples: (node, c_val)
             
-            while queue:
-                node, c_val = queue.popleft()
-                print("Visiting Segment: ", node)
+        #     while queue:
+        #         node, c_val = queue.popleft()
+        #         print("Visiting Segment: ", node)
                 
-                for child in tree.get(node, []):
-                    queue.append((child)) # store only the concentration at the outlet
-            print("Concentration values: ", len(concentration))
+        #         for child in tree.get(node, []):
+        #             queue.append((child)) # store only the concentration at the outlet
+        #     print("Concentration values: ", len(concentration))
         # for file in vtp_files:
         #     reader = vtk.vtkXMLPolyDataReader()
         #     reader.SetFileName(file)
@@ -590,7 +590,7 @@ class simulationInputs:
 ################################## MAIN ##################################
 
 if __name__ == "__main__":
-    path="/mnt/c/Users/rkona/Documents/advectionDiffusionFiles/Input/041725/Run3_1branches"
+    path="/mnt/c/Users/rkona/Documents/advectionDiffusionFiles/Input/042425/Run1_10branches"
     setup= simulationInputs(input_directory=path)
     setup.create_directory()
     setup.load_vtp()

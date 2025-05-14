@@ -18,3 +18,10 @@ Miniconda3-latest-Linux-x86_64.sh
 
 # Ignore cloned libraries
 /files/python/dolfinx-tutorial/
+
+# Ignore the large files
+/files/python/raksha/working_files/test_bifurcation/bifurcation.h5
+/files/python/raksha/working_files/test_bifurcation/bifurcation.xdmf
+/files/python/raksha/working_files/test_bifurcation/branched_network.geo
+/files/python/raksha/working_files/test_bifurcation/branched_network.msh
+/files/python/raksha/working_files/test_bifurcation/output/

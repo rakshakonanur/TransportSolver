@@ -41,8 +41,8 @@ class Bifurcation:
         self.mesh_tagging()
 
         # Temporal parameters
-        self.T = 100
-        self.dt = .2
+        self.T = 50
+        self.dt = 0.5
         self.t = 0
         self.num_timesteps = int(self.T / self.dt)
 
@@ -131,6 +131,29 @@ class Bifurcation:
         print("Facet indices: ", facet_indices, flush=True)
         print("Facet markers: ", facet_markers, flush=True)
 
+    def compute_element_tangents(self):
+        """Compute unit tangent vectors for each cell in a 1D mesh."""
+        import numpy.linalg as la
+        mesh = self.mesh
+        dim = mesh.topology.dim
+
+        # Get cell indices and connectivity
+        cells = np.arange(mesh.topology.index_map(dim).size_local, dtype=np.int32)
+        conn = mesh.topology.connectivity(dim, 0)
+        cell_nodes = [conn.links(i) for i in cells]
+
+        # Access node coordinates
+        coords = mesh.geometry.x
+
+        tangents = []
+        for nodes in cell_nodes:
+            p0 = coords[nodes[0]]
+            p1 = coords[nodes[1]]
+            delta = p1 - p0
+            tangent = delta / la.norm(delta)
+            tangents.append(tangent)
+
+        return cells, np.array(tangents)
 
     def setup(self):
         ''' Setup of the variational problem for the advection-diffusion equation
@@ -155,7 +178,20 @@ class Bifurcation:
         Pk_vec = element("Lagrange", self.mesh.basix_cell(), degree=self.element_degree, shape=(self.mesh.geometry.dim,))
         V = functionspace(self.mesh, Pk_vec)
         u = Function(V)
-        u.interpolate(lambda x: (1.0*x[0] - x[0] + self.u_val, 0.0*x[1], 0.0*x[2])) # div(u)=0 by construction
+        cells, self.tangents = self.compute_element_tangents()
+
+        # Each dof in u lies in a cell, so we assign values per cell
+        from dolfinx.fem.petsc import apply_lifting
+        from dolfinx.fem import FunctionSpace
+        from dolfinx.cpp.mesh import cell_entity_type
+
+        # Loop over local cells and assign tangent vectors
+        for i, cell in enumerate(cells):
+            dofs = V.dofmap.cell_dofs(cell)
+            for dof in dofs:
+                u.x.array[dof*3:dof*3+3] = self.tangents[i] * self.u_val  # scale by desired speed
+
+        # u.interpolate(lambda x: (1.0*x[0] - x[0] + self.u_val, 0.0*x[1], 0.0*x[2])) # div(u)=0 by construction
         # u.x.array[:] *= self.u_val  
         # u.x.array[:] = self.u_val  # constant velocity field
         print("Number of elements: ", self.mesh.topology.index_map(self.mesh.topology.dim).size_global, flush=True)
@@ -181,8 +217,9 @@ class Bifurcation:
         # Surrounding concentration term:
         u_ex = lambda x: 1 + 0.0000001 *x[0] #x[0]**2 + 2*x[1]**2  
         x = ufl.SpatialCoordinate(self.mesh)
-        s = u_ex(x) # models the surrounding concentration
-        r = Constant(self.mesh, dfx.default_scalar_type(10)) # for heat transfer, models the heat transfer coefficient
+        # s = u_ex(x) # models the surrounding concentration
+        s = Constant(self.mesh, dfx.default_scalar_type(1.0))
+        r = Constant(self.mesh, dfx.default_scalar_type(0)) # for heat transfer, models the heat transfer coefficient
         g = dot(n, grad(u_ex(x))) # corresponding to the Neumann BC
 
         print("Total number of dofs: ", self.W.dofmap.index_map.size_global, flush=True)
@@ -374,11 +411,11 @@ if __name__ == '__main__':
     comm = MPI.COMM_WORLD # MPI communicator
     write_output = True
     L = 1.0
-    u_val = 0.5 # Velocity value
+    u_val = 0.1 # Velocity value
     k = 1 # Finite element polynomial degree
 
     # Create transport solver object
-    transport_sim = Bifurcation(c_val=np.full(500, 1.0),
+    transport_sim = Bifurcation(c_val=np.full(100, 1.0),
                                     # c_val=np.linspace(1, 1.5, 100),
                                     u_val=u_val,
                                     element_degree=k,

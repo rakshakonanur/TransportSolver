@@ -1,5 +1,7 @@
 import pandas as pd
 
+# Run with: gmsh branched_network.geo -1 -format msh2 -o branched_network.msh
+
 def write_geo_from_branching_data(df, output_file="branched_network.geo", elements_per_line=5):
     point_map = {}
     geo_points = []

@@ -14,7 +14,6 @@ from dolfinx.fem.petsc import assemble_matrix, create_vector, assemble_vector, s
 from ufl import (FacetNormal, Identity, Measure, TestFunctions, TrialFunctions, exp, div, inner, SpatialCoordinate,
                  as_vector, div, dot, ds, dx, inner, lhs, grad, nabla_grad, rhs, sym, system)
 from typing import List, Optional
-from projector import Projector
 from dolfinx.io import XDMFFile
 
 """
@@ -26,7 +25,7 @@ from dolfinx.io import XDMFFile
     References for the projector: 
         https://github.com/michalhabera/dolfiny/blob/202e43711c54bb5d376a6e622e0bc896a20102dd/src/dolfiny/projection.py#L8-L48
         https://github.com/ComputationalPhysiology/oasisx/blob/e8e1b84af0b8675ad57090eddbcd9f08a3b2b63c/src/oasisx/function.py#L1-L124
-        https://github.com/Simula-SSCP/SSCP_lectures/blob/main/L12%20(FEniCS%20Intro)/L02_FEniCS_Diffusion.ipynb (cloned in SSCP_lectures repo)
+        https://github.com/Simula-SSCP/SSCP_lectures/blob/main/L12%20(FEniCS%20Intro)/L03_FEniCS_Darcy.ipynb (cloned in SSCP_lectures repo)
         hherlyng/DG_advection_diffusion.py
           
 """

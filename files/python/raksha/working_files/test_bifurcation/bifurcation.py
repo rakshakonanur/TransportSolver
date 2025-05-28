@@ -50,36 +50,6 @@ class Bifurcation:
         """
         Read the mesh from a file and convert it to XDMF format.
         """
-        # Read the mesh using meshio and write it to XDMF format
-        # This is necessary because dolfinx does not support .msh files directly
-        # Convert .msh to .vtu
-        # mesh = meshio.read("bifurcation.msh")
-        # meshio.write("before.vtu", mesh)
-
-
-        # # Step 2: Apply vtkConnectivityFilter to keep the largest connected component
-        # reader = vtk.vtkXMLUnstructuredGridReader()
-        # reader.SetFileName("before.vtu")
-        # reader.Update()
-        # input_mesh = reader.GetOutput()
-
-        # connectivity_filter = vtk.vtkConnectivityFilter()
-        # connectivity_filter.SetInputData(input_mesh)
-        # connectivity_filter.SetExtractionModeToLargestRegion()  # Keep the largest component
-        # connectivity_filter.Update()
-
-        # # Step 3: Write the filtered mesh to a new .vtu file
-
-        # writer = vtk.vtkXMLUnstructuredGridWriter()
-        # writer.SetFileName("after.vtu")
-        # writer.SetInputData(connectivity_filter.GetOutput())
-        # writer.Write()
-
-
-        # # Step 4: Convert the filtered .vtu to .xdmf using meshio
-        # filtered_mesh = meshio.read("after.vtu")
-        # meshio.write("bifurcation.xdmf", filtered_mesh)
-
         # Read full Gmsh mesh
         msh = meshio.read("bifurcation.msh")
 
@@ -154,6 +124,51 @@ class Bifurcation:
             tangents.append(tangent)
 
         return cells, np.array(tangents)
+    
+    # def assign_velocity_field(self):
+    #     """
+    #     Interpolate scalar velocity × tangent vector field using u.interpolate().
+    #     Works with higher-order elements robustly.
+    #     """
+    #     from scipy.spatial import cKDTree
+
+    #     # 1. Get coordinates of mesh dofs (not just P1!)
+    #     V_scalar = functionspace(self.mesh, element("Lagrange", self.mesh.basix_cell(), self.element_degree))
+    #     dof_coords = V_scalar.tabulate_dof_coordinates()
+
+    #     # 2. Build KDTree from cell centers (from compute_element_tangents)
+    #     dim = self.mesh.topology.dim
+    #     conn = self.mesh.topology.connectivity(dim, 0)
+    #     cell_nodes = [conn.links(i) for i in range(len(self.tangents))]
+    #     tangent_points = np.array([self.mesh.geometry.x[nodes] for nodes in cell_nodes])
+    #     tangent_centers = tangent_points.mean(axis=1)  # shape: (num_cells, 3)
+    #     tree = cKDTree(tangent_centers)
+
+    #     # 3. Store scalar velocity as an array
+    #     scalar_vals = self.u_val
+
+    #     # 4. Build a callable for interpolation
+    #     tangents = self.tangents
+
+    #     def velocity_callable(x):
+    #         """
+    #         Interpolation of u(x) = scalar_val * tangent using nearest cell center.
+    #         x: shape (3, N)
+    #         return shape: (3, N)
+    #         """
+    #         # Interpolate scalar velocity from known dof coordinates using nearest-neighbor
+    #         _, dof_indices = tree.query(x.T)  # nearest tangent per point
+    #         local_tangents = tangents[dof_indices]  # shape: (N, 3)
+
+    #         # Nearest scalar val per point (assumes x close to known dof coords)
+    #         _, nearest_dofs = tree.query(x.T)
+    #         scalar_interp = scalar_vals[nearest_dofs]  # shape: (N,)
+
+    #         # Multiply scalar × tangent per point
+    #         return (scalar_interp[:, np.newaxis] * local_tangents).T  # shape (3, N)
+
+    #     # 5. Interpolate into vector field
+    #     self.u.interpolate(velocity_callable)   
 
     def setup(self):
         ''' Setup of the variational problem for the advection-diffusion equation
@@ -169,27 +184,24 @@ class Bifurcation:
         fdim = self.mesh.topology.dim - 1
 
         # Facet normal and integral measures
-        n  = ufl.FacetNormal(self.mesh)
+        self.n  = ufl.FacetNormal(self.mesh)
         # self.dx = ufl.Measure('dx', domain=self.mesh) # Cell integrals
-        ds = ufl.Measure("ds", domain=self.mesh, subdomain_data=self.facet_tag)
+        self.ds = ufl.Measure("ds", domain=self.mesh, subdomain_data=self.facet_tag)
         dS = ufl.Measure("dS", domain=self.mesh)
 
         # === Function spaces ===
         Pk_vec = element("Lagrange", self.mesh.basix_cell(), degree=self.element_degree, shape=(self.mesh.geometry.dim,))
         V = functionspace(self.mesh, Pk_vec)
-        u = Function(V)
+        self.u = Function(V)
         cells, self.tangents = self.compute_element_tangents()
 
-        # Each dof in u lies in a cell, so we assign values per cell
-        from dolfinx.fem.petsc import apply_lifting
-        from dolfinx.fem import FunctionSpace
-        from dolfinx.cpp.mesh import cell_entity_type
+        # self.assign_velocity_field()
 
         # Loop over local cells and assign tangent vectors
         for i, cell in enumerate(cells):
             dofs = V.dofmap.cell_dofs(cell)
             for dof in dofs:
-                u.x.array[dof*3:dof*3+3] = self.tangents[i] * self.u_val  # scale by desired speed
+                self.u.x.array[dof*3:dof*3+3] = self.tangents[i] * self.u_val  # scale by desired speed
 
         # u.interpolate(lambda x: (1.0*x[0] - x[0] + self.u_val, 0.0*x[1], 0.0*x[2])) # div(u)=0 by construction
         # u.x.array[:] *= self.u_val  
@@ -199,7 +211,6 @@ class Bifurcation:
         Pk = element("Lagrange", self.mesh.basix_cell(), degree=self.element_degree)
         self.W = functionspace(self.mesh, Pk)
         print("Total number of concentration dofs: ", self.W.dofmap.index_map.size_global, flush=True)
-        
         
         # === Trial, test, and solution functions ===
         c, w = ufl.TrialFunction(self.W), ufl.TestFunction(self.W)
@@ -218,9 +229,9 @@ class Bifurcation:
         u_ex = lambda x: 1 + 0.0000001 *x[0] #x[0]**2 + 2*x[1]**2  
         x = ufl.SpatialCoordinate(self.mesh)
         # s = u_ex(x) # models the surrounding concentration
-        s = Constant(self.mesh, dfx.default_scalar_type(1.0))
-        r = Constant(self.mesh, dfx.default_scalar_type(0)) # for heat transfer, models the heat transfer coefficient
-        g = dot(n, grad(u_ex(x))) # corresponding to the Neumann BC
+        self.s = Constant(self.mesh, dfx.default_scalar_type(0.5))
+        self.r = Constant(self.mesh, dfx.default_scalar_type(100)) # for heat transfer, models the heat transfer coefficient
+        self.g = dot(self.n, grad(u_ex(x))) # corresponding to the Neumann BC
 
         print("Total number of dofs: ", self.W.dofmap.index_map.size_global, flush=True)
 
@@ -240,12 +251,12 @@ class Bifurcation:
                 # bc = dirichletbc(u_D, dofs)
                 return bc, "Dirichlet", None, None
             elif bc_type == "Neumann":
-                L_neumann = inner(values, w) * ds(marker)
+                L_neumann = inner(values, w) * self.ds(marker)
                 return None, "Neumann", None, L_neumann
             elif bc_type == "Robin":
                 r_val, s_val = values
-                a_robin = r_val * inner(c, w) * ds(marker)
-                L_robin = r_val * inner(s_val, w) * ds(marker)
+                a_robin = r_val * inner(c, w) * self.ds(marker)
+                L_robin = r_val * inner(s_val, w) * self.ds(marker)
                 return None, "Robin", a_robin, L_robin
             else:
                 raise TypeError(f"Unknown boundary condition: {bc_type}")
@@ -253,7 +264,7 @@ class Bifurcation:
         # Define the Dirichlet and Robin conditions
         bcs_raw = [
             ("Dirichlet", 1, self.c_val[self.t]),
-             ("Robin", 2, (r, s)),
+             ("Robin", 2, (self.r, self.s)),
             # ("Neumann",2, g)
         ]
 
@@ -274,7 +285,7 @@ class Bifurcation:
 
         # Variational forms
         a_time     = c * w / deltaT * ufl.dx
-        a_advect   = dot(u, grad(c)) * w * ufl.dx
+        a_advect   = dot(self.u, grad(c)) * w * ufl.dx
         a_diffuse  = dot(grad(c), grad(w)) * D * ufl.dx
 
         a = a_time + a_advect + a_diffuse + sum(robin_a_terms)
@@ -287,11 +298,12 @@ class Bifurcation:
         self.bcs = boundary_conditions
 
         # Create output function in P1 space
-        self.c_out = dfx.fem.Function(dfx.fem.functionspace(self.mesh, Pk))
+        self.P1 = element("Lagrange", self.mesh.basix_cell(), degree=1) # Linear Lagrange elements
+        self.c_out = dfx.fem.Function(dfx.fem.functionspace(self.mesh, self.P1))
         self.u_out = dfx.fem.Function(dfx.fem.functionspace(self.mesh, Pk_vec))
         
         # Interpolate it into the velocity function
-        self.u_out.x.array[:] = u.x.array.copy()
+        self.u_out.x.array[:] = self.u.x.array.copy()
         self.u_out.x.scatter_forward()
 
         # === Total concentration integral ===
@@ -302,6 +314,7 @@ class Bifurcation:
             out_str = './output/bifurcation_conc_D=' + f'{D.value}' + '.xdmf'
             self.xdmf_c = dfx.io.XDMFFile(self.mesh.comm, out_str, 'w')
             self.xdmf_c.write_mesh(self.mesh)
+            self.c_out.interpolate(self.c_h)  # Interpolate the concentration function
             self.xdmf_c.write_function(self.c_out, self.t)
 
             out_str = './output/bifurcation_vel_D=' + f'{D.value}' + '.xdmf'
@@ -310,7 +323,7 @@ class Bifurcation:
             self.xdmf_u.write_function(self.u_out, self.t)
 
             # Write velocity to file
-            vtx_u = dfx.io.VTXWriter(MPI.COMM_WORLD, './output/velocity.bp', [u], 'BP4')
+            vtx_u = dfx.io.VTXWriter(MPI.COMM_WORLD, './output/velocity.bp', [self.u], 'BP4')
             vtx_u.write(0)
             vtx_u.close()
 
@@ -333,6 +346,33 @@ class Bifurcation:
         apply_lifting(self.b, [self.a_cpp], bcs=[self.bcs])
         self.b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
         set_bc(self.b, bcs=self.bcs)
+
+    def check_boundary_conditions(self, visualize=False):
+
+        """
+        Compute and plot the error in (Robin) BC implementation on the outlet.
+        Evaluates D * grad(c) · n + r * c - r * s over the outlet boundary.
+        Should be near zero if the Robin BC is implemented correctly.
+        """
+
+        W = self.W
+        D = self.D_value
+        r = self.r
+        s = self.s
+        n = self.n
+
+        # Create function for error evaluation
+        from dolfinx.fem import assemble_scalar, form
+        import ufl
+
+        # Compute the integrand over outlet facets (marker=2)
+        normal_flux = D * dot(grad(self.c_h), n)
+        robin_expr = normal_flux + r * self.c_h - r * s
+
+        # Square it to compute L2 error
+        error_form = robin_expr**2 * self.ds(2) # calculates square of L2 error over the outlet facets
+        error_squared = assemble_scalar(form(error_form)) # assemble into a scalar, by converting symbolic UFL form to Fenicsx
+        self.total_error = self.mesh.comm.allreduce(error_squared, op=MPI.SUM) # gather all the errors from all processes in case of parallel execution  
 
     def run(self):
         """ Run transport simulations. """
@@ -375,6 +415,9 @@ class Bifurcation:
                 # Write to file
                 self.c_out.interpolate(self.c_h)
                 self.xdmf_c.write_function(self.c_out, self.t)
+
+                self.check_boundary_conditions(visualize=True)
+                print(f"L2 error of Robin BC at outlet: {np.sqrt(self.total_error):.4e}") # find the square root
 
             self.snapshots.append(self.c_h.x.array.copy())
             self.time_values.append(self.t)

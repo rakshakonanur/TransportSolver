@@ -45,6 +45,12 @@ class Bifurcation:
         # self.N = 10
         self.c_val = c_val
         self.input_directory = input_directory
+
+        # Temporal parameters
+        self.T = 100
+        self.dt = 0.2
+        self.t = 0
+        self.num_timesteps = int(self.T / self.dt) + 1 # +1 to include the initial condition at t=0
         
         # self.mesh = create_interval(MPI.COMM_WORLD, self.N, [0.0, L])
         self.convert_mesh()
@@ -56,12 +62,6 @@ class Bifurcation:
             self.u_val = u_val
         
         self.mesh_tagging()
-
-        # Temporal parameters
-        self.T = 100
-        self.dt = 1
-        self.t = 0
-        self.num_timesteps = int(self.T / self.dt)
 
     def convert_mesh(self):
         """
@@ -288,6 +288,22 @@ class Bifurcation:
         #     u_val[i, :] = interpolated
 
         self.u_val = u_val
+
+        # Incorporating temporal interpolation
+        print("Timestep interpolation: ", self.num_timesteps, flush=True)
+        print("Number of timesteps in 1D NS solution: ", num_timesteps, flush=True)
+        T = 100
+        if self.num_timesteps + 1 != num_timesteps:
+            from scipy.interpolate import interp1d
+            # Suppose u_val has shape (num_timesteps, num_dofs)
+            old_times = np.linspace(0, T, num=num_timesteps) # from the 1D NS solution
+            new_times = np.linspace(0, self.T, num=self.num_timesteps) # interpolating to 1D advection-diffusion solution
+
+            # Interpolate each dof across time
+            f_interp = interp1d(old_times, u_val, axis=0, kind='linear', fill_value="extrapolate")
+            u_val_interp = f_interp(new_times)  # shape: (self.num_timesteps, num_dofs)
+            print("Interpolated velocity field from {} to {} timesteps.".format(num_timesteps, self.num_timesteps))
+            self.u_val = u_val_interp
 
     def mesh_tagging(self):
         fdim = self.mesh.topology.dim - 1
@@ -612,7 +628,6 @@ class Bifurcation:
         # Create function for error evaluation
         from dolfinx.fem import assemble_scalar, form
         import ufl
-
         # Compute the integrand over outlet facets (marker=2)
         normal_flux = D * dot(grad(self.c_h), n)
         robin_expr = normal_flux + r * self.c_h - r * s
@@ -629,7 +644,7 @@ class Bifurcation:
         self.snapshots = []
         self.time_values = []
       
-        for _ in range(self.num_timesteps):
+        for _ in range(self.num_timesteps - 1):
             
             self.t += self.dt
             # Get x positions once (only for Lagrange P1 elements in 1D)
@@ -643,7 +658,7 @@ class Bifurcation:
             for i, cell in enumerate(self.cells):
                 dofs = V.dofmap.cell_dofs(cell)
                 for dof in dofs:
-                    scalar_val = 0.001 * self.u_val[self.t, dof]
+                    scalar_val = 0.001 * self.u_val[_, dof]
                     self.u.x.array[dof*3:dof*3+3] = self.tangents[i] * scalar_val
             # self.assign_velocity_field()
             self.u.x.scatter_forward()
@@ -696,7 +711,7 @@ if __name__ == '__main__':
     k = 1 # Finite element polynomial degree
     path="/mnt/c/Users/rkona/Documents/syntheticVasculature/1D Output/052325/Run1_100branches"
     # Create transport solver object
-    transport_sim = Bifurcation(c_val=np.full(101, 10.0),
+    transport_sim = Bifurcation(c_val=np.full(501, 10.0),
                                     # c_val= np.concatenate([np.linspace(0, 2, 75), np.linspace(2, 0, 75), np.linspace(0, 0, 100)]),
                                     user_velocity=user_velocity,
                                     u_val=u_val,

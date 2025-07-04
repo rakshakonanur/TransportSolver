@@ -1,6 +1,7 @@
 # Ignore Python cache
 /files/python/raksha/__pycache__/
 /files/python/raksha/.cache/
+/files/python/raksha/working_files/test_cube_perfusion/.cache/
 
 # Ignore library files
 /files/libs/sklearn-env/
@@ -41,3 +42,14 @@ Miniconda3-latest-Linux-x86_64.sh
 /files/python/raksha/working_files/test_full_model/test.py
 /files/python/raksha/working_files/test_full_model/velocity_timeseries.h5
 /files/python/raksha/working_files/test_full_model/velocity_timeseries.xdmf
+files/python/raksha/working_files/test_full_model/results.vtk
+files/python/raksha/working_files/test_full_model/tube_model_combined.vtp
+files/python/raksha/working_files/test_full_model/all_branches.vtp
+files/python/raksha/working_files/test_cube_perfusion/output/
+
+# Ignore mp4
+*.mp4
+*.xdmf
+*.h5
+
+

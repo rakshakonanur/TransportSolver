@@ -41,8 +41,8 @@ class Bifurcation:
         self.mesh_tagging()
 
         # Temporal parameters
-        self.T = 50
-        self.dt = 0.5
+        self.T = 500
+        self.dt = 1.0
         self.t = 0
         self.num_timesteps = int(self.T / self.dt)
 
@@ -291,6 +291,17 @@ class Bifurcation:
         a = a_time + a_advect + a_diffuse + sum(robin_a_terms)
         L = (self.c_ / deltaT + f) * w * ufl.dx + sum(robin_L_terms)
 
+        # Incorporate the upwind velocity term
+        b_mag = ufl.sqrt(ufl.dot(self.u, self.u)) + 1e-10
+        tau = h / (2 * b_mag)  # standard SUPG τ
+
+        # --- Strong residual ---
+        residual = -ufl.div(D * ufl.grad(c)) + ufl.dot(self.u, ufl.grad(c)) - f
+
+        # SUPG terms
+        a += tau * ufl.dot(self.u, ufl.grad(w)) * residual * ufl.dx
+        L += tau * ufl.dot(self.u, ufl.grad(w)) * f * ufl.dx
+
         self.a_cpp = form(a)
         self.L_cpp = form(L)
 
@@ -372,7 +383,7 @@ class Bifurcation:
         # Square it to compute L2 error
         error_form = robin_expr**2 * self.ds(2) # calculates square of L2 error over the outlet facets
         error_squared = assemble_scalar(form(error_form)) # assemble into a scalar, by converting symbolic UFL form to Fenicsx
-        self.total_error = self.mesh.comm.allreduce(error_squared, op=MPI.SUM) # gather all the errors from all processes in case of parallel execution  
+        self.total_error = self.mesh.comm.allreduce(error_squared, op=MPI.SUM) # gather all the errors from all processes in case of parallel execution
 
     def run(self):
         """ Run transport simulations. """
@@ -454,11 +465,11 @@ if __name__ == '__main__':
     comm = MPI.COMM_WORLD # MPI communicator
     write_output = True
     L = 1.0
-    u_val = 0.1 # Velocity value
+    u_val = 0.01 # Velocity value
     k = 1 # Finite element polynomial degree
 
     # Create transport solver object
-    transport_sim = Bifurcation(c_val=np.full(100, 1.0),
+    transport_sim = Bifurcation(c_val=np.full(500, 5.0),
                                     # c_val=np.linspace(1, 1.5, 100),
                                     u_val=u_val,
                                     element_degree=k,

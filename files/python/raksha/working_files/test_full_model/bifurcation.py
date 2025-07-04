@@ -1,7 +1,7 @@
 from dolfinx.io import XDMFFile
 from mpi4py import MPI
 
-from ufl import dot, grad, jump, inner
+from ufl import dot, grad, jump, inner, div, avg
 from petsc4py import PETSc
 from dolfinx.fem import FunctionSpace, dirichletbc, locate_dofs_geometrical, Function
 from dolfinx.fem.petsc import LinearProblem
@@ -47,8 +47,8 @@ class Bifurcation:
         self.input_directory = input_directory
 
         # Temporal parameters
-        self.T = 100
-        self.dt = 0.2
+        self.T = 2.5
+        self.dt = 0.01
         self.t = 0
         self.num_timesteps = int(self.T / self.dt) + 1 # +1 to include the initial condition at t=0
         
@@ -58,6 +58,7 @@ class Bifurcation:
             # self.load_vtp()
             # self.centerlineVelocity()
             self.import_velocity()
+            self.results_to_vtk() # save the results to a VTK file
         else:
             self.u_val = u_val
         
@@ -157,7 +158,7 @@ class Bifurcation:
             pickle.dump(all_data, f)
         self.data_series = all_data
     
-    def centerlineVelocity(self):
+    def centerlineVelocity(self, points_per_section=20):
         """
         Interpolate the velocity data from the VTP files onto the centerline of the reference model.
         Args:
@@ -173,28 +174,29 @@ class Bifurcation:
         self.centerlineVel = []  # initialize as a list
         self.centerlineFlow = []  # initialize as a list
 
+        from scipy.spatial import cKDTree
+
         for i in range(len(self.data_series)):
             print(f"Processing timestep {i}")
 
-            area_1d = self.data_series[i]["point_data"]["Area"]  # (N,)
+            self.area = self.data_series[i]["point_data"]["Area"]  # (N,)
             flowrate_1d = self.data_series[i]["point_data"]["Flowrate"]  # (N,)
             reynolds_1d = self.data_series[i]["point_data"]["Reynolds"]  # (N,)
-            coords_1d = self.data_series[i]["coords"]  # (N, 3)
+            self.mesh_3d_coords = self.data_series[i]["coords"]  # (N, 3)
             
-            velocity_1d = flowrate_1d/area_1d # calculate velocity from flowrate and area
-            centerline = velocity_1d[::20] # save only one point for each cross-section
-            centerlineFlowrate = flowrate_1d[::20] # save only one point for each cross-section
+            velocity_1d = flowrate_1d/self.area # calculate velocity from flowrate and area
+            centerline = velocity_1d[::points_per_section] # save only one point for each cross-section
+            centerlineFlowrate = flowrate_1d[::points_per_section] # save only one point for each cross-section
             self.centerlineFlow.append(centerlineFlowrate) # save the flowrate values for each timestep in each row
+
             self.centerlineVel.append(centerline)# save the velocity values for each timestep in each row
-            centerlineCoords = coords_1d.reshape(-1, 20, 3).mean(axis=1)
+            self.centerlineCoords = self.mesh_3d_coords.reshape(-1, points_per_section, 3).mean(axis=1)
             
-            output = pv.PolyData(centerlineCoords)
+            output = pv.PolyData(self.centerlineCoords)
 
             output["Velocity_Magnitude"] = centerline
             output.save(f"output/averagedVelocity_{i:04d}.vtp")
 
-        self.centerlineVelocity = np.array(self.centerlineVelocity)
-        print("✅ Projected flowrate values saved to 'averageVelocity.vtp'")
 
     def import_velocity(self):
         
@@ -292,7 +294,7 @@ class Bifurcation:
         # Incorporating temporal interpolation
         print("Timestep interpolation: ", self.num_timesteps, flush=True)
         print("Number of timesteps in 1D NS solution: ", num_timesteps, flush=True)
-        T = 100
+        T = 250
         if self.num_timesteps + 1 != num_timesteps:
             from scipy.interpolate import interp1d
             # Suppose u_val has shape (num_timesteps, num_dofs)
@@ -313,7 +315,7 @@ class Bifurcation:
 
         self.mesh.topology.create_connectivity(fdim, self.mesh.topology.dim)
         boundary_facets_indices = exterior_facet_indices(self.mesh.topology)
-        inlet = np.array([3.0, 3.05, 3.4])
+        inlet = np.array([0.3, 0.305, 0.34]) #updated with units
         # print("Boundary facets indices: ", boundary_facets_indices, flush=True)
         # def left_boundary(x): return np.isclose(x[0], 0.0)
         # def right_boundary(x): return np.isclose(x[0], 2.0)
@@ -424,7 +426,7 @@ class Bifurcation:
 
         # Facet normal and integral measures
         self.n  = ufl.FacetNormal(self.mesh)
-        # self.dx = ufl.Measure('dx', domain=self.mesh) # Cell integrals
+        self.dx = ufl.Measure('dx', domain=self.mesh) # Cell integrals
         self.ds = ufl.Measure("ds", domain=self.mesh, subdomain_data=self.facet_tag)
         self.dS = ufl.Measure("dS", domain=self.mesh)
 
@@ -457,7 +459,6 @@ class Bifurcation:
         self.W = functionspace(self.mesh, self.Pk)
         print("Total number of concentration dofs: ", self.W.dofmap.index_map.size_global, flush=True)
         
-        
         # === Trial, test, and solution functions ===
         self.c, self.w = ufl.TrialFunction(self.W), ufl.TestFunction(self.W)
         self.c_h = Function(self.W)
@@ -475,8 +476,8 @@ class Bifurcation:
         self.u_ex = lambda x: 1 + 0.0000001 *x[0] #x[0]**2 + 2*x[1]**2  
         self.x = ufl.SpatialCoordinate(self.mesh)
         # s = u_ex(x) # models the surrounding concentration
-        self.s = Constant(self.mesh, dfx.default_scalar_type(5.0))
-        self.r = Constant(self.mesh, dfx.default_scalar_type(10.0)) # for heat transfer, models the heat transfer coefficient
+        self.s = Constant(self.mesh, dfx.default_scalar_type(1.0))
+        self.r = Constant(self.mesh, dfx.default_scalar_type(0.001)) # for heat transfer, models the heat transfer coefficient
         self.a = Constant(self.mesh, dfx.default_scalar_type(10))
         self.g = dot(self.n, grad(self.u_ex(self.x))) # corresponding to the Neumann BC
 
@@ -547,7 +548,7 @@ class Bifurcation:
         self.u_out.x.scatter_forward()
 
         # === Total concentration integral ===
-        self.total_c_form = form(self.c_h * ufl.dx)
+        self.total_c_form = form(self.c_h * self.dx)
 
         if self.write_output:
             # Create output file for the concentration
@@ -577,14 +578,13 @@ class Bifurcation:
         
     def assemble_transport_LHS(self):
         """ Assemble the linear system. """
-        
         # Variational forms
-        a_time     = self.c * self.w / self.deltaT * ufl.dx
-        a_advect   = dot(self.u, grad(self.c)) * self.w * ufl.dx
-        a_diffuse  = dot(grad(self.c), grad(self.w)) * self.D * ufl.dx
+        a_time     = self.c * self.w / self.deltaT * self.dx
+        a_advect   = dot(self.u, grad(self.c)) * self.w * self.dx
+        a_diffuse  = dot(grad(self.c), grad(self.w)) * self.D * self.dx
 
         a = a_time + a_advect + a_diffuse + sum(self.robin_a_terms)
-        L = (self.c_ / self.deltaT + self.f) * self.w * ufl.dx + sum(self.robin_L_terms)
+        L = (self.c_ / self.deltaT + self.f) * self.w * self.dx + sum(self.robin_L_terms)
 
         self.a_cpp = form(a)
         self.L_cpp = form(L)
@@ -610,6 +610,28 @@ class Bifurcation:
         apply_lifting(self.b, [self.a_cpp], bcs=[self.bcs])
         self.b.ghostUpdate(addv=PETSc.InsertMode.ADD_VALUES, mode=PETSc.ScatterMode.REVERSE)
         set_bc(self.b, bcs=self.bcs)
+
+    def check_residuals(self, visualize=False):
+
+        """
+        Compute and plot the residuals of the steady-state advection-diffusion equation.
+        """
+
+        W = self.W
+        D = self.D
+        r = self.r
+        s = self.s
+        n = self.n
+
+        # Create function for error evaluation
+        from dolfinx.fem import assemble_scalar, form
+        import ufl
+        # Compute the integrand over outlet facets (marker=2)
+        residual = dot(self.u, grad(self.c_h)) - D * div(grad(self.c_h))
+        # Square it to compute L2 error
+        error_form = residual**2 * self.dx # calculates square of L2 error over the interior facets
+        error_squared = assemble_scalar(form(error_form)) # assemble into a scalar, by converting symbolic UFL form to Fenicsx
+        self.total_residual = self.mesh.comm.allreduce(error_squared, op=MPI.SUM) # gather all the errors from all processes in case of parallel execution  
 
     def check_boundary_conditions(self, visualize=False):
 
@@ -642,6 +664,8 @@ class Bifurcation:
 
         # Allocate list to store time series snapshots
         self.snapshots = []
+        self.error = []
+        self.residuals = []
         self.time_values = []
       
         for _ in range(self.num_timesteps - 1):
@@ -658,7 +682,7 @@ class Bifurcation:
             for i, cell in enumerate(self.cells):
                 dofs = V.dofmap.cell_dofs(cell)
                 for dof in dofs:
-                    scalar_val = 0.001 * self.u_val[_, dof]
+                    scalar_val = self.u_val[_, dof]
                     self.u.x.array[dof*3:dof*3+3] = self.tangents[i] * scalar_val
             # self.assign_velocity_field()
             self.u.x.scatter_forward()
@@ -692,13 +716,226 @@ class Bifurcation:
                 self.xdmf_u.write_function(self.u_out, self.t)
 
                 self.check_boundary_conditions(visualize=True)
+                self.check_residuals(visualize=True)
                 print(f"L2 error of Robin BC at outlet: {np.sqrt(self.total_error):.4e}") # find the square root
+                print(f"L2 error of residuals: {np.sqrt(self.total_residual):.4e}") # find the square root
 
             self.snapshots.append(self.c_h.x.array.copy())
+            self.error.append(np.sqrt(self.total_error))  # Store the error for each timestep
+            self.residuals.append(np.sqrt(self.total_residual))
             self.time_values.append(self.t)
+
+        fig, ax = plt.subplots()
+        x_data_err, y_data_err = [], []
+        x_data_res, y_data_res = [], []
+
+        line_err, = ax.plot([], [], label="Robin BC Error", color='blue')
+        line_res, = ax.plot([], [], label="Residual", color='red')
+
+        ax.set_xlim(self.time_values[0], self.time_values[-1])
+        y_min = min(min(self.error), min(self.residuals)) - 0.01
+        y_max = max(max(self.error), max(self.residuals)) + 0.01
+        ax.set_ylim(y_min, y_max)
+
+        ax.set_xlabel("Time")
+        ax.set_ylabel("Value")
+        ax.set_title("Error Evolution")
+        ax.legend()
+
+        def update(frame):
+            # Append new data points
+            x_data_err.append(self.time_values[frame])
+            y_data_err.append(self.error[frame])
+
+            x_data_res.append(self.time_values[frame])
+            y_data_res.append(self.residuals[frame])
+
+            # Update both lines
+            line_err.set_data(x_data_err, y_data_err)
+            line_res.set_data(x_data_res, y_data_res)
+
+            ax.set_title(f"Time: {self.time_values[frame]:.2f}")
+            return line_err #, line_res
+
+        ani = FuncAnimation(fig, update, frames=len(self.error), interval=100, blit=False, repeat=False)
+        plt.show()
+
+
+        # fig, ax = plt.subplots()
+        # x_data, y_data = [], []
+        # line, = ax.plot([], [], label="Error over time")
+
+        # ax.set_xlim(self.time_values[0], self.time_values[-1])
+        # ax.set_ylim(min(self.error) - 0.01, max(self.error) + 0.01)
+        # ax.set_xlabel("Time")
+        # ax.set_ylabel("Error")
+        # ax.set_title("Error evolution")
+
+        # def update(frame):
+        #     x_data.append(self.time_values[frame])
+        #     y_data.append(self.error[frame])
+        #     line.set_data(x_data, y_data)
+        #     ax.set_title(f"Time: {self.time_values[frame]:.2f}")
+        #     return line,
+
+        # ani = FuncAnimation(fig, update, frames=len(self.error), interval=100, blit=False, repeat=False)
+
+        
+        # fig, ax = plt.subplots()
+        # x_data, y_data = [], []
+        # line, = ax.plot([], [], label="Error over time")
+
+        # ax.set_xlim(self.time_values[0], self.time_values[-1])
+        # ax.set_ylim(min(self.residuals) - 0.01, max(self.residuals) + 0.01)
+        # ax.set_xlabel("Time")
+        # ax.set_ylabel("Residuals")
+        # ax.set_title("Residuals evolution")
+
+        # def update_residual(frame):
+        #     x_data.append(self.time_values[frame])
+        #     y_data.append(self.residuals[frame])
+        #     line.set_data(x_data, y_data)
+        #     ax.set_title(f"Time: {self.time_values[frame]:.2f}")
+        #     return line,
+
+        # plt.legend()
+        # plt.show()
+        # ani.save("error_scalar_evolution.mp4", writer="ffmpeg", fps=10)
             
         return self.snapshots, self.time_values
+    
+    def results_to_vtk(self, output_file="results.vtk"):
+        """
+        Save the results to a VTK file.
+        Interpolates the concentration and velocity fields from xdmf files to 3D VTK format.
+        Args:
+            output_file (str): The name of the output VTK file.
+        """
+        from scipy.interpolate import RBFInterpolator
+        dim = self.mesh.topology.dim
 
+        # --- Centerline Coordinates and Area ---
+        self.mesh_3d_coords = self.data_series[0]["coords"]
+        self.centerlineCoords = self.mesh_3d_coords.reshape(-1, 20, 3).mean(axis=1)   # (N, 3)
+        centerlineCoords = self.centerlineCoords
+        area = self.data_series[0]["point_data"]["Area"][::20]                        # (N,)
+
+        # --- Mesh Points and Connectivity ---
+        mesh_points = self.mesh.geometry.x                                            # (M, 3)
+
+        # Get cell-to-vertex connectivity using topology
+        self.mesh.topology.create_connectivity(dim, 0)
+        conn = self.mesh.topology.connectivity(dim, 0)
+        num_cells = self.mesh.topology.index_map(dim).size_local
+
+        # Reconstruct cell list as (num_cells, 2)
+        mesh_cells = np.vstack([
+            conn.array[conn.offsets[i]:conn.offsets[i+1]]
+            for i in range(num_cells)
+        ])
+
+        # --- Step 1: RBF Interpolation ---
+        rbf_interp = RBFInterpolator(
+            centerlineCoords,
+            area,
+            kernel='linear',     # Try 'thin_plate_spline' for smoother results
+            neighbors=10
+        )
+        interpolated_area = rbf_interp(mesh_points)  # (M,)
+
+        # --- Step 2: Prepare VTK lines ---
+        vtk_lines = np.hstack([
+            np.full((mesh_cells.shape[0], 1), 2, dtype=np.int32),
+            mesh_cells
+        ]).flatten()
+
+        # --- Step 3: Create PyVista Line Mesh ---
+        line_mesh = pv.PolyData()
+        line_mesh.points = mesh_points
+        line_mesh.lines = vtk_lines
+        line_mesh['InterpolatedArea'] = interpolated_area
+
+        # --- Step 4: Save ---
+        line_mesh.save(output_file)
+        print(f"✅ Exported to '{output_file}'") 
+
+        # # Load the concentration field from snapshots
+        # concentration_centerline = np.zeros((self.num_timesteps, mesh_points.shape[0]))
+        # for t in range(self.num_timesteps):
+        #     concentration_centerline[t, :] = self.snapshots[t]
+
+        radius = np.sqrt(interpolated_area / np.pi)                      # shape (N,)
+        from collections import OrderedDict
+
+        # 1. Read the XDMF file using meshio
+        mesh = meshio.read("bifurcation.xdmf")
+
+        # print("Cell data keys:", mesh.cell_data_dict.keys())
+        # print("Point data keys:", mesh.point_data.keys())
+        # print("Cell data contents:")
+        # for key, data_dict in mesh.cell_data_dict.items():
+        #     print(f"  Cell type: {key}")
+        #     for name, array in data_dict.items():
+        #         print(f"    {name} -> shape: {array.shape} dtype: {array.dtype} unique values: {np.unique(array)}")
+        # print("Point data contents:")
+        # for name, array in mesh.point_data.items():
+        #     print(f"  {name} -> shape: {array.shape} dtype: {array.dtype} unique values: {np.unique(array)}")
+    
+
+        # 2. Identify the line cells and physical tags
+        line_cells = None
+        for cell_block in mesh.cells:
+            if cell_block.type == "line":
+                line_cells = cell_block.data
+                break
+
+        if line_cells is None:
+            raise RuntimeError("No line cells found.")
+
+        physical_tags = None
+        if "gmsh:physical" in mesh.cell_data_dict:
+            physical_tags_dict = mesh.cell_data_dict["gmsh:physical"]
+            if "line" in physical_tags_dict:
+                physical_tags = physical_tags_dict["line"]
+
+        if physical_tags is None:
+            raise RuntimeError("No physical tags found for line cells.")
+
+        print(f"Found physical tags for {len(physical_tags)} lines")
+
+
+        # 3. Group lines by branch ID (physical tag)
+        branches = {}
+        for i, tag in enumerate(physical_tags):
+            branches.setdefault(tag, []).append(line_cells[i])
+
+        # 4. Function to create tube mesh for each branch
+        def create_branch_tube(branch_lines, points, radius):
+            unique_pts = list(OrderedDict.fromkeys([pt for line in branch_lines for pt in line]))
+            branch_points = points[unique_pts]
+            # Ensure radius is a NumPy array
+            radius = np.asarray(radius)
+            branch_radii = radius[unique_pts]
+            line = pv.lines_from_points(branch_points, close=False)
+            line.point_data["Radius"] = branch_radii
+            
+            tube = line.tube(scalars="Radius", absolute=True)
+            return tube
+
+        # 5. Generate tubes and merge into a single mesh
+        points = mesh.points
+        combined_mesh = None
+        for branch_id, branch_lines in branches.items():
+            print(f"Processing branch {branch_id} with {len(branch_lines)} lines")
+            tube = create_branch_tube(branch_lines, points, radius)
+            if combined_mesh is None:
+                combined_mesh = tube
+            else:
+                combined_mesh = combined_mesh.merge(tube)
+
+        # 6. Save combined mesh to one VTP file
+        combined_mesh.save("all_branches.vtp")
+        print("Saved all branches combined to 'all_branches.vtp'")
 
 # === Time loop ===
 if __name__ == '__main__':
@@ -709,9 +946,9 @@ if __name__ == '__main__':
     L = 1.0
     u_val = 0.5 # Velocity value
     k = 1 # Finite element polynomial degree
-    path="/mnt/c/Users/rkona/Documents/syntheticVasculature/1D Output/052325/Run1_100branches"
+    path="/mnt/c/Users/rkona/Documents/syntheticVasculature/1D Output/070325/Run1_20branches"
     # Create transport solver object
-    transport_sim = Bifurcation(c_val=np.full(501, 10.0),
+    transport_sim = Bifurcation(c_val=np.full(251, 5.0),
                                     # c_val= np.concatenate([np.linspace(0, 2, 75), np.linspace(2, 0, 75), np.linspace(0, 0, 100)]),
                                     user_velocity=user_velocity,
                                     u_val=u_val,
@@ -721,25 +958,3 @@ if __name__ == '__main__':
     transport_sim.setup()
     transport_sim.run()
 
-
-
-# # Dirichlet BC for the inlet
-
-        # self.bc_left_func = Function(self.W)
-        # self.bc_left_func.x.array[:] = self.c_val[self.t] 
-
-        # self.dof_left = locate_dofs_geometrical(self.W, lambda x: np.isclose(x[0], 0.0))
-        # self.bcs = [dirichletbc(self.bc_left_func, self.dof_left)]
-
-        # Robin BC for the outlet
-        # self.bc_right = r * inner(u-s, w)* ds(2)
-
-        # # # For constant boundary condition
-        # self.bc_left = Constant(self.mesh, dfx.default_scalar_type(self.c_val[0]))
-        # self.dof_left = locate_dofs_geometrical(self.W, lambda x: np.isclose(x[0], 0.0))
-        # # self.bcs = [dirichletbc(self.bc_left, self.dof_left, self.W)]  # Only apply at inlet
-        # self.bcs = [dirichletbc(self.bc_left, self.dof_left, self.W)]  # Only apply at inlet
-
-
-        # === Variational Form ===
-        # un = (dot(u, n) + abs(dot(u, n))) / 2.0

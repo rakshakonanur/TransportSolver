@@ -46,6 +46,8 @@ files/python/raksha/working_files/test_full_model/results.vtk
 files/python/raksha/working_files/test_full_model/tube_model_combined.vtp
 files/python/raksha/working_files/test_full_model/all_branches.vtp
 files/python/raksha/working_files/test_cube_perfusion/output/
+files/python/raksha/working_files/supg/output/
+files/python/hherlyng/output/
 
 # Ignore mp4
 *.mp4

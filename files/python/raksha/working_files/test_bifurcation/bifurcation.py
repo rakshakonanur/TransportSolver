@@ -291,16 +291,16 @@ class Bifurcation:
         a = a_time + a_advect + a_diffuse + sum(robin_a_terms)
         L = (self.c_ / deltaT + f) * w * ufl.dx + sum(robin_L_terms)
 
-        # Incorporate the upwind velocity term
-        b_mag = ufl.sqrt(ufl.dot(self.u, self.u)) + 1e-10
-        tau = h / (2 * b_mag)  # standard SUPG τ
+        # # Incorporate the upwind velocity term
+        # b_mag = ufl.sqrt(ufl.dot(self.u, self.u)) + 1e-10
+        # tau = h / (2 * b_mag)  # standard SUPG τ
 
-        # --- Strong residual ---
-        residual = -ufl.div(D * ufl.grad(c)) + ufl.dot(self.u, ufl.grad(c)) - f
+        # # --- Strong residual ---
+        # residual = -ufl.div(D * ufl.grad(c)) + ufl.dot(self.u, ufl.grad(c)) - f
 
-        # SUPG terms
-        a += tau * ufl.dot(self.u, ufl.grad(w)) * residual * ufl.dx
-        L += tau * ufl.dot(self.u, ufl.grad(w)) * f * ufl.dx
+        # # SUPG terms
+        # a += tau * ufl.dot(self.u, ufl.grad(w)) * residual * ufl.dx
+        # L += tau * ufl.dot(self.u, ufl.grad(w)) * f * ufl.dx
 
         self.a_cpp = form(a)
         self.L_cpp = form(L)

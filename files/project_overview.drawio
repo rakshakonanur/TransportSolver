@@ -1,23 +1,145 @@
 <mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15" version="27.2.0">
   <diagram name="Page-1" id="Zww0Mv0YQaKtA7fRsS1n">
-    <mxGraphModel dx="1018" dy="697" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+    <mxGraphModel dx="1018" dy="697" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="1" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="xWsyt9iw-kWxEk4zxhVR-2" value="Synthetic Network" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="90" y="110" width="120" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="xWsyt9iw-kWxEk4zxhVR-3" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" target="xWsyt9iw-kWxEk4zxhVR-2">
-          <mxGeometry width="50" height="50" relative="1" as="geometry">
-            <mxPoint x="150" y="280" as="sourcePoint" />
-            <mxPoint x="190" y="200" as="targetPoint" />
+        <mxCell id="usF1LMcp2Vs79QD0hJof-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" parent="1" source="xWsyt9iw-kWxEk4zxhVR-2">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="187" y="140" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="xWsyt9iw-kWxEk4zxhVR-11" value="&lt;ul&gt;&lt;li&gt;Value 1&lt;/li&gt;&lt;li&gt;Value 2&lt;/li&gt;&lt;li&gt;Value 3&lt;/li&gt;&lt;/ul&gt;" style="text;strokeColor=none;fillColor=none;html=1;whiteSpace=wrap;verticalAlign=middle;overflow=hidden;" vertex="1" parent="1">
-          <mxGeometry x="100" y="280" width="100" height="80" as="geometry" />
+        <mxCell id="xWsyt9iw-kWxEk4zxhVR-2" value="Synthetic Network" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="7" y="110" width="120" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="xWsyt9iw-kWxEk4zxhVR-12" value="Synthetic Vessel Generation" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
-          <mxGeometry x="160" y="210" width="80" height="30" as="geometry" />
+        <mxCell id="xWsyt9iw-kWxEk4zxhVR-3" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" parent="1" target="xWsyt9iw-kWxEk4zxhVR-2" edge="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="67" y="280" as="sourcePoint" />
+            <mxPoint x="107" y="200" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xWsyt9iw-kWxEk4zxhVR-11" value="$$\Delta P = P_{perm} - P_{term}$$&lt;div&gt;&lt;br&gt;&lt;/div&gt;" style="text;strokeColor=none;fillColor=none;verticalAlign=middle;overflow=hidden;spacing=2;html=1;whiteSpace=wrap;fontColor=light-dark(#000000,#FFFFFF);" parent="1" vertex="1">
+          <mxGeometry x="0.5" y="277.5" width="133" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="xWsyt9iw-kWxEk4zxhVR-12" value="Synthetic Vessel Generation" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="77" y="210" width="80" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-4" value="1D Navier-Stokes" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="177" y="110" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-5" value="" style="endArrow=classic;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" parent="1" source="usF1LMcp2Vs79QD0hJof-4">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="297" y="320" as="sourcePoint" />
+            <mxPoint x="387" y="140" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-6" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;fontColor=light-dark(#000000,#FF3399);" edge="1" parent="1" target="usF1LMcp2Vs79QD0hJof-4">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="237" y="50" as="sourcePoint" />
+            <mxPoint x="257" y="20" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-7" value="Pressure Field" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontColor=light-dark(#000000,#FFFFFF);" vertex="1" parent="1">
+          <mxGeometry x="247" y="50" width="80" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="usF1LMcp2Vs79QD0hJof-8" target="usF1LMcp2Vs79QD0hJof-16">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="657" y="140" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-8" value="1D Advection-Diffusion" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="387" y="110" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-9" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;fontColor=light-dark(#000000,#FF3399);" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="447" y="45" as="sourcePoint" />
+            <mxPoint x="447" y="105" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-10" value="Inlet Tracer Concentration" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontColor=light-dark(#000000,#FFFFFF);" vertex="1" parent="1">
+          <mxGeometry x="457" y="55" width="80" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-12" value="Outflow Tracer Conc." style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="543" y="110" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-13" value="Flow-field" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="305" y="104" width="70" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="usF1LMcp2Vs79QD0hJof-16">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="752.3333333333335" y="270" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-16" value="3D Darcy Perfusion" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="692" y="110" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-17" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="752" y="50" as="sourcePoint" />
+            <mxPoint x="752" y="110" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-18" value="External Pressure Field" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontColor=light-dark(#000000,#FFFFFF);" vertex="1" parent="1">
+          <mxGeometry x="667" y="40" width="80" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-20" value="Velocity-field" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="747" y="200" width="90" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-21" value="3D Advection-Diffusion" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="692" y="270" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-22" value="" style="endArrow=classic;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="usF1LMcp2Vs79QD0hJof-21" target="usF1LMcp2Vs79QD0hJof-24">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="387" y="340" as="sourcePoint" />
+            <mxPoint x="507" y="300" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-23" value="Inflow Tracer Conc." style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="505" y="265" width="130" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-24" value="1D Advection-Diffusion" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="344" y="270" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-30" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;" edge="1" parent="1" source="usF1LMcp2Vs79QD0hJof-25">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="404.3333333333335" y="330.0000000000001" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-25" value="1D Navier-Stokes" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="344" y="390" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-28" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;fontColor=light-dark(#000000,#FF3399);" edge="1" parent="1" target="usF1LMcp2Vs79QD0hJof-25">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="404" y="520" as="sourcePoint" />
+            <mxPoint x="414" y="480" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-29" value="Pressure Field" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontColor=light-dark(#000000,#FFFFFF);" vertex="1" parent="1">
+          <mxGeometry x="417" y="480" width="80" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-31" value="Flow-field" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="406" y="345" width="70" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-32" value="" style="rounded=0;whiteSpace=wrap;html=1;fontColor=default;labelBorderColor=light-dark(#000000,#FFFF66);textOpacity=0;dashed=1;fillColor=none;strokeColor=light-dark(#000000,#FFFB00);" vertex="1" parent="1">
+          <mxGeometry x="672" y="84" width="160" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-34" value="" style="rounded=0;whiteSpace=wrap;html=1;labelBorderColor=light-dark(#000000,#FF3333);textOpacity=0;dashed=1;fillColor=none;strokeColor=light-dark(#000000,#FF0000);" vertex="1" parent="1">
+          <mxGeometry x="309" y="238" width="193" height="232" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-35" value="" style="rounded=0;whiteSpace=wrap;html=1;fontColor=default;labelBorderColor=light-dark(#000000,#FF3333);textOpacity=0;dashed=1;fillColor=none;strokeColor=light-dark(#000000,#0000FF);" vertex="1" parent="1">
+          <mxGeometry x="164" y="90" width="383" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-38" value="INFLOW BRANCH" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="550" y="170" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-39" value="OUTFLOW BRANCH" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="245" y="360" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-40" value="&lt;br&gt;$$n_{branches}$$" style="text;strokeColor=none;fillColor=none;verticalAlign=middle;overflow=hidden;spacing=2;html=1;whiteSpace=wrap;fontColor=light-dark(#000000,#FFFFFF);" vertex="1" parent="1">
+          <mxGeometry x="38" y="315" width="58" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="usF1LMcp2Vs79QD0hJof-41" value="&lt;br&gt;$$Q_{term}$$&lt;div&gt;&lt;br&gt;&lt;/div&gt;" style="text;strokeColor=none;fillColor=none;verticalAlign=middle;overflow=hidden;spacing=2;html=1;whiteSpace=wrap;fontStyle=1;fontColor=light-dark(#000000,#FFFFFF);" vertex="1" parent="1">
+          <mxGeometry x="42" y="290" width="50" height="50" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>

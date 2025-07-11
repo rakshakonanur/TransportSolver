@@ -24,6 +24,7 @@ RIGHT = 4
 TOP = 5
 BOTTOM = 6
 WALL = 7
+OTHER = 0
 
 
 # Set compiler options for runtime optimization
@@ -80,12 +81,17 @@ def create_cube_mesh_with_tags(N_cells: int) -> tuple((dfx.mesh.Mesh, dfx.mesh.M
         sorted_facets = np.argsort(bc_facet_indices)
 
         internal_inlet_facets = find_interior_facets_near_point(mesh, inlet, tol=0.05)
+        # internal_inlet_facets2 = find_interior_facets_near_point(mesh, [0.2, 0.5, 0.8], tol=0.05)
         internal_outlet_facets = find_interior_facets_near_point(mesh, outlet, tol=0.05)
+        other_facets = np.setdiff1d(np.arange(mesh.topology.index_map(fdim).size_local, dtype=np.int32), internal_inlet_facets)
+        other_facets = np.setdiff1d(other_facets, internal_outlet_facets)
 
-        internal_indices = np.concatenate([internal_inlet_facets, internal_outlet_facets])
+        internal_indices = np.concatenate([internal_inlet_facets, internal_outlet_facets, other_facets])
         internal_markers = np.concatenate([
             np.full_like(internal_inlet_facets, INLET),
-            np.full_like(internal_outlet_facets, OUTLET)
+            np.full_like(internal_outlet_facets, OUTLET),
+            np.full_like(other_facets, OTHER)  # Mark other facets with 0
+
         ])
  
         sorted_internal = np.argsort(internal_indices)
@@ -105,12 +111,16 @@ def find_interior_facets_near_point(mesh, point, tol=0.01):
     num_facets = mesh.topology.index_map(fdim).size_local
 
     interior_facets = []
+    midpoints = []
     for facet in range(num_facets):
         connected_cells = mesh.topology.connectivity(fdim, mesh.topology.dim).links(facet)
         if len(connected_cells) == 2:
             x = dfx.mesh.compute_midpoints(mesh, fdim, np.array([facet], dtype=np.int32))
+            midpoints.append(x[0])  # Store the midpoints for debugging
+            # print(f"Facet {facet} midpoints: {x[0]}")
             if np.linalg.norm(x[0] - point) < tol:
                 interior_facets.append(facet)
+    # np.savetxt("./midpoints.txt", midpoints)  # Save all midpoints for debugging
     return np.array(interior_facets, dtype=np.int32)
 
 
@@ -159,7 +169,7 @@ class Transport:
         self.u = dfx.fem.Function(V) # velocity
         Pk = element("Lagrange", self.mesh.basix_cell(), degree=1)
         self.u.x.array[:] = 0.0 # Set velocity u=0.0 everywhere
-        self.u.x.array[0::3] = 0.1 # Set velocity u=0.1 in x-direction
+        self.u.x.array[0::3] = 0.10 # Set velocity u=0.1 in x-direction
         DG = element("DG", self.mesh.basix_cell(), degree=self.element_degree) # Discontinuous Galerkin element
         W = dfx.fem.functionspace(self.mesh, DG) # function space for concentration
         deltaT = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(self.dt)) # Time step size
@@ -212,28 +222,28 @@ class Transport:
         # residual = dot(self.u, grad(self.c_h)) - self.D * div(grad(self.c_h)) + (self.c_h - self.c_) / deltaT - f
 
         # Impose BC using Nitsche's method
-        a_nitsche = nitsche / avg(hf) * avg(c) * avg(w) * self.dS(INLET)
-        L_nitsche = nitsche / avg(hf) * avg(self.bc_func) * avg(w) * self.dS(INLET)
+        a_nitsche = nitsche('+') / hf('+') * c('+') * w('+') * self.dS(INLET)
+        L_nitsche = nitsche('+') / hf('+') * self.bc_func('+') * w('+')* self.dS(INLET)
 
         # Upwind velocity
         un = (dot(self.u, self.n) + abs(dot(self.u, self.n))) / 2.0
-        a_upwind = dot(jump(w), un('+') * c('+') - un('-') * c('-')) * self.dS
+        a_upwind = dot(jump(w), un('+') * c('+') - un('-') * c('-')) * self.dS # + dot(w,un*c) * self.ds
 
         # Enforce Neumann BC at the outlet
         # u_n = dot(self.u, self.n)
         # c_ext = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(0)) # Set external concentration to zero
         # L_outflow = - conditional(avg(un) > 0, un('+') * c_ext * avg(w), 0.0) * self.dS(OUTLET)
 
-        outflux  = c('+')*dot(self.u('+'), self.n('+')) # Only advective flux on outflow boundary, diffusive flux is zero
-        u_normal = dot(self.u, self.n) # The normal velocity
+        # outflux  = c('+')*dot(self.u('+'), self.n('+')) # Only advective flux on outflow boundary, diffusive flux is zero
+        # u_normal = dot(self.u, self.n) # The normal velocity
 
-        # Create conditional expressions
-        cond  = ufl.lt(u_normal, 0.0) # Condition: True if the normal velocity is less than zero, u.n < 0
-        minus = ufl.conditional(cond, 1.0, 0.0) # Conditional that returns 1.0 if u.n <  0, else 0.0. Used to "activate" terms on the influx  boundary
-        plus  = ufl.conditional(cond, 0.0, 1.0) # Conditional that returns 1.0 if u.n >= 0, else 0.0. Used to "activate" terms on the outflux boundary
+        # # Create conditional expressions
+        # cond  = ufl.lt(u_normal, 0.0) # Condition: True if the normal velocity is less than zero, u.n < 0
+        # minus = ufl.conditional(cond, 1.0, 0.0) # Conditional that returns 1.0 if u.n <  0, else 0.0. Used to "activate" terms on the influx  boundary
+        # plus  = ufl.conditional(cond, 0.0, 1.0) # Conditional that returns 1.0 if u.n >= 0, else 0.0. Used to "activate" terms on the outflux boundary
         
-        # Add outflux term to the weak form
-        a += plus('+')*outflux* w('+') * self.dS(OUTLET)
+        # # Add outflux term to the weak form
+        # a += plus('+')*outflux* w('+') * self.dS(OUTLET)
 
         a += a_nitsche + a_upwind # + a_outflow
         L += L_nitsche # + L_outflow
@@ -338,34 +348,6 @@ class Transport:
 
                 self.u_out.interpolate(self.u)
                 self.xdmf_u.write_function(self.u_out, self.t)
-        
-        # fig, ax = plt.subplots()
-        # line, = ax.plot(x_coords, snapshots[0])
-        # ax.set_ylim(min(map(np.min, snapshots)), max(map(np.max, snapshots))+0.1)
-        # ax.set_xlabel("x")
-        # ax.set_ylabel("Concentration")
-        # ax.set_title("Concentration evolution")
-
-        # def update(frame):
-        #     line.set_ydata(snapshots[frame])
-        #     ax.set_title(f"Time: {time_values[frame]:2.2f}")
-        #     return line,
-
-        # ani = FuncAnimation(fig, update, frames=len(snapshots), interval=10, blit=False, repeat=False)
-
-        # # Plot the solution
-        # try:
-        #     import matplotlib.pyplot as plt
-        # except:
-        #     RuntimeError("A matplotlib is required to plot the solution.")
-        # plt.plot(self.c_h.function_space.tabulate_dof_coordinates()[:, 0], self.c_h.x.array)
-        # plt.show()
-
-        # Save as MP4 (requires ffmpeg installed)
-        # ani.save("hal_conservation_0.1.mp4", writer="ffmpeg", fps=20)
-
-        # Or save as GIF (requires imagemagick installed)
-        # ani.save("sine_wave.gif", writer="imagemagick", fps=20)
 
         plt.close()
 
@@ -375,7 +357,7 @@ if __name__ == '__main__':
     comm = MPI.COMM_WORLD # MPI communicator
     write_output = True
 
-    T = 1.5 # Final simulation time
+    T = 20 # Final simulation time
     dt = 0.01 # Timestep size
     N = int(argv[1]) # Number of mesh cells
     D_value = 1e-2 # Diffusion coefficient

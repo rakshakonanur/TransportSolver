@@ -25,7 +25,7 @@ LEFT = 1; RIGHT = 2
 D_value = 1e-3
 k = 1 # Element degree
 t = 0 # Initial time
-T = 10 # Final time
+T = 20 # Final time
 dt = 0.1 # Timestep size
 num_timesteps = int(T / dt)
 n = ufl.FacetNormal(mesh)
@@ -89,7 +89,7 @@ bcs.append(dfx.fem.dirichletbc(bc_right, dof_right, W))  # Apply at outlet
 
 # === Total concentration integral ===
 total_c_form = dfx.fem.form(c_h * dx)
-error_form = residual**2 * dx # calculates square of L2 error over the interior facets
+error_form = residual**2 * dx # calculates square of L2 error over the facets
 
 # === Linear system ===
 A = assemble_matrix(a_cpp, bcs=bcs)
@@ -154,7 +154,7 @@ if __name__ == '__main__':
 
     fig, ax = plt.subplots()
     line, = ax.plot(x_coords, snapshots[0])
-    ax.set_ylim(min(map(np.min, snapshots)), max(map(np.max, snapshots))+0.1)
+    ax.set_ylim(min(map(np.min, snapshots)), max(map(np.max, snapshots))*1.1)
     ax.set_xlabel("x")
     ax.set_ylabel("Concentration")
     ax.set_title("Concentration evolution")
@@ -171,7 +171,11 @@ if __name__ == '__main__':
         import matplotlib.pyplot as plt
     except:
         RuntimeError("A matplotlib is required to plot the solution.")
-    plt.plot(c_h.function_space.tabulate_dof_coordinates()[:, 0], c_h.x.array)
+    plt.plot(c_h.function_space.tabulate_dof_coordinates()[:, 0], c_h.x.array, label="Numerical solution")
+    gamma = (0.1)/D_value
+    c_true = (1/0.1) *(x_coords - ((1- np.exp(gamma * x_coords)) / (1 - np.exp(gamma))))
+    plt.plot(x_coords, c_true, label="Analytical solution")
+    plt.legend()
     plt.show()
 
     # Save as MP4 (requires ffmpeg installed)

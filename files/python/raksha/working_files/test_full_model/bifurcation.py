@@ -477,7 +477,7 @@ class Bifurcation:
         self.x = ufl.SpatialCoordinate(self.mesh)
         # s = u_ex(x) # models the surrounding concentration
         self.s = Constant(self.mesh, dfx.default_scalar_type(1.0))
-        self.r = Constant(self.mesh, dfx.default_scalar_type(0.001)) # for heat transfer, models the heat transfer coefficient
+        self.r = Constant(self.mesh, dfx.default_scalar_type(1.0)) # for heat transfer, models the heat transfer coefficient
         self.a = Constant(self.mesh, dfx.default_scalar_type(10))
         self.g = dot(self.n, grad(self.u_ex(self.x))) # corresponding to the Neumann BC
 
@@ -586,6 +586,17 @@ class Bifurcation:
         a = a_time + a_advect + a_diffuse + sum(self.robin_a_terms)
         L = (self.c_ / self.deltaT + self.f) * self.w * self.dx + sum(self.robin_L_terms)
 
+        # # Incorporate the upwind velocity term
+        # b_mag = ufl.sqrt(ufl.dot(self.u, self.u)) + 1e-10
+        # tau = h / (2 * b_mag)  # standard SUPG τ
+
+        # # --- Strong residual ---
+        # residual = -ufl.div(D * ufl.grad(c)) + ufl.dot(self.u, ufl.grad(c)) - f
+
+        # # SUPG terms
+        # a += tau * ufl.dot(self.u, ufl.grad(w)) * residual * ufl.dx
+        # L += tau * ufl.dot(self.u, ufl.grad(w)) * f * ufl.dx
+
         self.a_cpp = form(a)
         self.L_cpp = form(L)
 
@@ -652,7 +663,7 @@ class Bifurcation:
         import ufl
         # Compute the integrand over outlet facets (marker=2)
         normal_flux = D * dot(grad(self.c_h), n)
-        robin_expr = normal_flux + r * self.c_h - r * s
+        robin_expr = normal_flux - (r * self.c_h - r * s)
 
         # Square it to compute L2 error
         error_form = robin_expr**2 * self.ds(2) # calculates square of L2 error over the outlet facets

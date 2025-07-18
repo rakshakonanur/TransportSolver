@@ -2,6 +2,7 @@
 /files/python/raksha/__pycache__/
 /files/python/raksha/.cache/
 /files/python/raksha/working_files/test_cube_perfusion/.cache/
+files/python/raksha/working_files/DG/.cache/
 
 # Ignore library files
 /files/libs/sklearn-env/
@@ -54,4 +55,4 @@ files/python/hherlyng/output/
 *.xdmf
 *.h5
 
-
+.DS_store

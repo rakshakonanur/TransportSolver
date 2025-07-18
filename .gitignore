@@ -3,6 +3,9 @@
 /files/python/raksha/.cache/
 /files/python/raksha/working_files/test_cube_perfusion/.cache/
 files/python/raksha/working_files/DG/.cache/
+/files/python/raksha/working_files/bioreactor/geometry/__pycache__
+/files/python/raksha/working_files/bioreactor/perfusion/.cache/
+/files/python/raksha/working_files/bioreactor/transport
 
 # Ignore library files
 /files/libs/sklearn-env/
@@ -54,5 +57,7 @@ files/python/hherlyng/output/
 *.mp4
 *.xdmf
 *.h5
+*.vtu
+*.pvtu
 
 .DS_store

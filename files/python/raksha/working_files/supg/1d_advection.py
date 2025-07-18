@@ -89,7 +89,6 @@ bcs.append(dfx.fem.dirichletbc(bc_right, dof_right, W))  # Apply at outlet
 
 # === Total concentration integral ===
 total_c_form = dfx.fem.form(c_h * dx)
-error_form = residual**2 * dx # calculates square of L2 error over the facets
 
 # === Linear system ===
 A = assemble_matrix(a_cpp, bcs=bcs)
@@ -140,13 +139,29 @@ if __name__ == '__main__':
         print("Maximum concentration: ", mesh.comm.allreduce(c_h.x.array.max(), op=MPI.MAX))
         print("Minimum concentration: ", mesh.comm.allreduce(c_h.x.array.min(), op=MPI.MIN))
 
+        # === Compute residual norm ===
+        # Step 1: Copy RHS vector
+        residual_vec = b.copy()
+
+        # Step 2: Compute A * c_h
+        A_ch = b.copy()  # Temporary PETSc vector
+        A.mult(c_h.x.petsc_vec, A_ch)
+
+        # Step 3: Subtract A * c_h from b
+        residual_vec.axpy(-1.0, A_ch)  # residual_vec = b - A_ch
+
+        # Step 4: Compute residual norm (e.g. L2 norm)
+        res_norm = residual_vec.norm()
+        print(f"Residual norm ||r|| = {res_norm:.2e}")
+
+
         total_c = dfx.fem.assemble_scalar(total_c_form)
         total_c = mesh.comm.allreduce(total_c, op=MPI.SUM)
         print(f"Total concentration: {total_c:.2e}")
 
-        error_squared = dfx.fem.assemble_scalar(dfx.fem.form(error_form)) # assemble into a scalar, by converting symbolic UFL form to Fenicsx
-        total_residual = mesh.comm.allreduce(error_squared, op=MPI.SUM) # gather all the errors from all processes in case of parallel execution
-        print(f"Total residual: {np.sqrt(total_residual):.2e}")
+        # error_squared = dfx.fem.assemble_scalar(dfx.fem.form(error_form)) # assemble into a scalar, by converting symbolic UFL form to Fenicsx
+        # total_residual = mesh.comm.allreduce(error_squared, op=MPI.SUM) # gather all the errors from all processes in case of parallel execution
+        # print(f"Total residual: {np.sqrt(total_residual):.2e}")
 
         snapshots.append(c_h.x.array.copy())
         time_values.append(t)

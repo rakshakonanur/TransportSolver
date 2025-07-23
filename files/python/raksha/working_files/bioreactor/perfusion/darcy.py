@@ -56,7 +56,6 @@ class PerfusionSolver:
         k = 1
         P_el = element("Lagrange", self.mesh.basix_cell(), k)
         u_el = element("DG", self.mesh.basix_cell(), k-1, shape=(self.mesh.geometry.dim,))
-        dx = Measure("dx", self.mesh)
 
         # Define function spaces
         W = dfx.fem.functionspace(self.mesh, P_el) # Pressure function space

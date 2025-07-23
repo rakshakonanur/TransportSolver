@@ -55,50 +55,83 @@ def import_velocity(xdmf_file):
     return 1e-5*velocity_np
     return velocity
 
+
 def import_mesh(xdmf_file):
     """
     Import a mesh from an XDMF file.
     """
     with XDMFFile(MPI.COMM_WORLD, xdmf_file, "r") as xdmf:
+        # Read mesh and create connectivities
         mesh = xdmf.read_mesh(name="Grid")
-        tdim = mesh.topology.dim  # Topological dimension
-        fdim = mesh.topology.dim - 1  # Facet dimension
-        mesh.topology.create_connectivity(fdim, tdim)
-        mesh.topology.create_connectivity(tdim, fdim)
+        mesh.topology.create_connectivity(mesh.topology.dim, 0)
+        mesh.topology.create_connectivity(mesh.topology.dim - 1, 0)
 
-        facet2cells = mesh.topology.connectivity(fdim, tdim)
+        # Read vertex tags
+        mesh_facets = xdmf.read_meshtags(mesh, name="mesh_tags")  # Tags on vertices (dim=0)
+        assert mesh_facets.dim == 0, "mesh_tags must be on vertices (dim=0)"
+        mesh_coords = mesh.geometry.x
 
-        mesh_facets = xdmf.read_meshtags(mesh, name="mesh_tags")
-        # Check number of tagged entities
-        facet_indices = mesh_facets.find(1)
+        # --- Identify boundary (external) vertices ---
+        boundary_facets = dfx.mesh.locate_entities_boundary(
+            mesh, mesh.topology.dim - 1, lambda x: np.full(x.shape[1], True)
+        )
+        boundary_vertex_links = mesh.topology.connectivity(mesh.topology.dim - 1, 0)
+        boundary_vertices = np.unique(
+            np.hstack([boundary_vertex_links.links(f) for f in boundary_facets])
+        )
 
-        print("Facet indices for marker 1:", facet_indices)
-        print("Number of facets:", len(facet_indices))
-        print("Tag dimensions:", mesh_facets.dim)
+        # --- Separate tagged vertices into internal / external ---
+        tagged_vertices = mesh_facets.indices
+        tagged_values = mesh_facets.values
 
-        # Optional: list all tag values
-        print("Tag values present:", mesh_facets.values)
+        is_boundary = np.isin(tagged_vertices, boundary_vertices)
+        external_vertices = tagged_vertices[is_boundary]
+        internal_vertices = tagged_vertices[~is_boundary]
 
-        interior_facets = []
-        exterior_facets = []
+        internal_tags = dfx.mesh.meshtags(mesh, 0, internal_vertices, tagged_values[~is_boundary])
+        external_tags = dfx.mesh.meshtags(mesh, 0, external_vertices, tagged_values[is_boundary])
+    
+    internal_facet_tags = convert_vertex_tags_to_facet_tags(mesh, internal_tags)
+    external_facet_tags = convert_vertex_tags_to_facet_tags(mesh, external_tags)
 
-        for f in facet_indices:
-            cells = facet2cells.links(f)
-            if len(cells) == 2:
-                interior_facets.append(f)
-            elif len(cells) == 1:
-                exterior_facets.append(f)
+    return mesh, internal_facet_tags, external_facet_tags
 
-        interior_facets = np.array(interior_facets, dtype=np.int32)
-        exterior_facets = np.array(exterior_facets, dtype=np.int32)
+def convert_vertex_tags_to_facet_tags(mesh, vertex_tags):
+    """
+    Given vertex-based tags (dim=0), convert them to facet-based tags (dim=dim-1)
+    by assigning each facet the most common tag among its vertices.
+    """
+    tdim = mesh.topology.dim
+    fdim = tdim - 1
 
-        interior_tags = np.full(len(interior_facets), 1, dtype=np.int32)
-        exterior_tags = np.full(len(exterior_facets), 2, dtype=np.int32)
+    # Create needed connectivities
+    mesh.topology.create_connectivity(fdim, 0)  # facet -> vertex
 
-        interior_mt = dfx.mesh.meshtags(mesh, fdim, interior_facets, interior_tags)
-        exterior_mt = dfx.mesh.meshtags(mesh, fdim, exterior_facets, exterior_tags)
+    facet_to_vertex = mesh.topology.connectivity(fdim, 0)
+    facet_indices = []
+    facet_values = []
 
-    return mesh, interior_mt, exterior_mt
+    for facet in range(mesh.topology.index_map(fdim).size_local):
+        vertex_ids = facet_to_vertex.links(facet)
+        tags_on_vertices = vertex_tags.values[np.isin(vertex_tags.indices, vertex_ids)]
+
+        if len(tags_on_vertices) > 0:
+            # Assign the first (or most common) tag
+            tag = np.bincount(tags_on_vertices).argmax()
+            facet_indices.append(facet)
+            facet_values.append(tag)
+
+    facet_indices = np.array(facet_indices, dtype=np.int32)
+    facet_values = np.array(facet_values, dtype=np.int32)
+
+    # # Write mesh and tags to output files
+    # if mesh.comm.rank == 0:
+    #     out_str = './output/mesh_tags.xdmf'
+    #     with XDMFFile(mesh.comm, out_str, 'w') as xdmf_out:
+    #         xdmf_out.write_mesh(mesh)
+    #         xdmf_out.write_meshtags(dfx.mesh.meshtags(mesh, fdim, facet_indices, facet_values), mesh.geometry)
+
+    return dfx.mesh.meshtags(mesh, fdim, facet_indices, facet_values)
 
 def project_velocity(mesh, velocity):
     """
@@ -125,6 +158,13 @@ def project_velocity(mesh, velocity):
 
     projector = Projector(W)
     u_proj = projector(vel)  # Project the velocity onto the mesh
+
+    # Write the projected velocity to a file
+    if mesh.comm.rank == 0:
+        out_str = './output/velocity_projected.xdmf'
+        with XDMFFile(mesh.comm, out_str, 'w') as xdmf_out:
+            xdmf_out.write_mesh(mesh)
+            xdmf_out.write_function(u_proj, 0.0)
 
     return u_proj
 
@@ -217,6 +257,10 @@ class Transport:
 
         # SUPG terms
         # residual = dot(self.u, grad(self.c_h)) - self.D * div(grad(self.c_h)) + (self.c_h - self.c_) / deltaT - f
+        v_supg = tau * dot(self.u, grad(w))
+
+        a_supg = v_supg * (c / deltaT + dot(self.u, grad(c)) - self.D * div(grad(c))) * self.dx
+        L_supg = v_supg * (self.c_ / deltaT + f) * self.dx
 
         # Impose BC using Nitsche's method
         a_nitsche = nitsche('+') / hf('+') * c('+') * w('+') * self.dS(1)
@@ -242,10 +286,9 @@ class Transport:
         # # Add outflux term to the weak form
         # a += plus('+')*outflux* w('+') * self.dS(OUTLET)
 
-        a += a_nitsche + a_upwind # + a_outflow
-        L += L_nitsche # + L_outflow
+        a += a_nitsche + a_upwind + a_supg# + a_outflow
+        L += L_nitsche + L_supg# + L_outflow
 
-        # a += a_upwind # + a_outflow
 
         self.a_cpp = dfx.fem.form(a, jit_options=jit_parameters)
         self.L_cpp = dfx.fem.form(L, jit_options=jit_parameters)
@@ -349,6 +392,8 @@ class Transport:
                 self.xdmf_u.write_function(self.u_out, self.t)
 
         plt.close()
+
+    
 
 class Projector():
     def __init__(self, V):

@@ -135,7 +135,7 @@ def branch_mesh_tagging(mesh):
 
     mesh.topology.create_connectivity(fdim, mesh.topology.dim)
     boundary_facets_indices = dfx.mesh.exterior_facet_indices(mesh.topology)
-    inlet = np.array([0.3, 0.305, 0.34]) #updated with units
+    inlet = np.array([0,0.41,0.34]) #updated with units
     tol = 1e-6
 
     def near_inlet(x):

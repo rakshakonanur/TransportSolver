@@ -84,3 +84,14 @@ sigma_h, u_h = w_h.split()
 with io.XDMFFile(domain.comm, "out_mixed_poisson/u.xdmf", "w") as file:
     file.write_mesh(domain)
     file.write_function(u_h)
+
+with io.XDMFFile(domain.comm, "out_mixed_poisson/sigma.xdmf", "w") as file:
+    file.write_mesh(domain)
+    P1 = element("Lagrange", domain.basix_cell(), degree=1, shape=(domain.geometry.dim,))
+    sigma_interp = fem.Function(fem.functionspace(domain, P1))
+
+    # Interpolate the data
+    sigma_interp.interpolate(sigma_h)
+
+    # Write interpolated function
+    file.write_function(sigma_interp)

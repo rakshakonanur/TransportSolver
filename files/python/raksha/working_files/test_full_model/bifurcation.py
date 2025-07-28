@@ -315,7 +315,7 @@ class Bifurcation:
 
         self.mesh.topology.create_connectivity(fdim, self.mesh.topology.dim)
         boundary_facets_indices = exterior_facet_indices(self.mesh.topology)
-        inlet = np.array([0.3, 0.305, 0.34]) #updated with units
+        inlet = np.array([0,0.41,0.34]) #updated with units
         # print("Boundary facets indices: ", boundary_facets_indices, flush=True)
         # def left_boundary(x): return np.isclose(x[0], 0.0)
         # def right_boundary(x): return np.isclose(x[0], 2.0)
@@ -443,7 +443,7 @@ class Bifurcation:
         from dolfinx.fem import FunctionSpace
         from dolfinx.cpp.mesh import cell_entity_type
 
-        # Loop over local cells and assign tangent vectors
+        # Loop over local cells and assign tangent vectors --> MIGHT NEED TO BE CHANGED
         for i, cell in enumerate(self.cells):
             dofs = V.dofmap.cell_dofs(cell)
             for dof in dofs:
@@ -627,22 +627,21 @@ class Bifurcation:
         """
         Compute and plot the residuals of the steady-state advection-diffusion equation.
         """
+        # === Compute residual norm ===
+        # Step 1: Copy RHS vector
+        residual_vec = self.b.copy()
 
-        W = self.W
-        D = self.D
-        r = self.r
-        s = self.s
-        n = self.n
+        # Step 2: Compute A * c_h
+        A_ch = self.b.copy()  # Temporary PETSc vector
+        self.A.mult(self.c_h.x.petsc_vec, A_ch)
 
-        # Create function for error evaluation
-        from dolfinx.fem import assemble_scalar, form
-        import ufl
-        # Compute the integrand over outlet facets (marker=2)
-        residual = dot(self.u, grad(self.c_h)) - D * div(grad(self.c_h))
-        # Square it to compute L2 error
-        error_form = residual**2 * self.dx # calculates square of L2 error over the interior facets
-        error_squared = assemble_scalar(form(error_form)) # assemble into a scalar, by converting symbolic UFL form to Fenicsx
-        self.total_residual = self.mesh.comm.allreduce(error_squared, op=MPI.SUM) # gather all the errors from all processes in case of parallel execution  
+        # Step 3: Subtract A * c_h from b
+        residual_vec.axpy(-1.0, A_ch)  # residual_vec = b - A_ch
+
+        # Step 4: Compute residual norm (e.g. L2 norm)
+        res_norm = residual_vec.norm()
+        print(f"Residual norm ||r|| = {res_norm:.2e}")
+        self.total_residual = res_norm**2  # Store the squared norm for later use
 
     def check_boundary_conditions(self, visualize=False):
 
@@ -957,7 +956,7 @@ if __name__ == '__main__':
     L = 1.0
     u_val = 0.5 # Velocity value
     k = 1 # Finite element polynomial degree
-    path="/mnt/c/Users/rkona/Documents/syntheticVasculature/1D Output/070325/Run1_20branches"
+    path="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/071725/Run5_25branches"
     # Create transport solver object
     transport_sim = Bifurcation(c_val=np.full(251, 5.0),
                                     # c_val= np.concatenate([np.linspace(0, 2, 75), np.linspace(2, 0, 75), np.linspace(0, 0, 100)]),

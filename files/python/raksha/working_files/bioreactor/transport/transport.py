@@ -52,7 +52,7 @@ def import_velocity(xdmf_file):
     velocity  =  mesh.GetCellData().GetArray("f")
     velocity_np = vtk_to_numpy(velocity)  # shape: (N, 3)
     print("Velocity shape:", velocity_np.shape)
-    return 1e-5*velocity_np
+    return 1e-3*velocity_np
     return velocity
 
 
@@ -200,7 +200,7 @@ class Transport:
         self.D_value = 1e-3
         self.k = 1 # Element degree
         self.t = 0 # Initial time
-        self.T = 10 # Final time
+        self.T = 50 # Final time
         self.dt = 0.1 # Timestep size
         self.num_timesteps = int(self.T / self.dt)
         self.n = ufl.FacetNormal(self.mesh)

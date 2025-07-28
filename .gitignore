@@ -52,6 +52,10 @@ files/python/raksha/working_files/test_full_model/all_branches.vtp
 files/python/raksha/working_files/test_cube_perfusion/output/
 files/python/raksha/working_files/supg/output/
 files/python/hherlyng/output/
+files/python/raksha/working_files/bioreactor/perfusion/out_darcy/
+files/python/raksha/working_files/bioreactor/transport/output/
+files/python/raksha/working_files/bioreactor/single-compartment/output/
+files/python/raksha/working_files/bioreactor/single-compartment/out_mixed_poisson/
 
 # Ignore mp4
 *.mp4

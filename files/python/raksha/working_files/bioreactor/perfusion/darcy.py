@@ -77,7 +77,7 @@ class PerfusionSolver:
         wall_BC_dofs = dfx.fem.locate_dofs_topological(W, fdim, wall_BC_facets)
 
         self.bc_func = dfx.fem.Function(W)
-        self.bc_func.x.array[:] = 60.0  # * 1333.22  # Convert mmHg to Pa
+        self.bc_func.x.array[:] = 1.0  # * 1333.22  # Convert mmHg to Pa
         dofs = self.facets.find(1) # Tag 1 is the outlets of the branched network
         bcs = [dfx.fem.dirichletbc(self.bc_func, dofs),
                dfx.fem.dirichletbc(bc_wall, np.setdiff1d(wall_BC_dofs, dofs), W)]

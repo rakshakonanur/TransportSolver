@@ -64,5 +64,5 @@ def write_geo_from_branching_data(df, output_file="branched_network.geo", elemen
 # Load your data and call the function
 
 # Example usage:
-df = pd.read_csv("/mnt/c/Users/rkona/Documents/syntheticVasculature/1D Output/070325/Run1_20branches/1D Input Files/branchingData.csv")  # Replace with your actual path
+df = pd.read_csv("/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/071725/Run5_25branches/1D_Input_Files/branchingData.csv")  # Replace with your actual path
 write_geo_from_branching_data(df, output_file="branched_network.geo", elements_per_line=1000)

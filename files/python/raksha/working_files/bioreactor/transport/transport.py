@@ -49,10 +49,10 @@ def import_velocity(xdmf_file):
     reader.Update()
 
     mesh = reader.GetOutput()
-    velocity  =  mesh.GetCellData().GetArray("f")
+    velocity  =  mesh.GetPointData().GetArray("f")
     velocity_np = vtk_to_numpy(velocity)  # shape: (N, 3)
     print("Velocity shape:", velocity_np.shape)
-    return 1e-3*velocity_np
+    return 5e-5 * velocity_np
     return velocity
 
 
@@ -138,26 +138,31 @@ def project_velocity(mesh, velocity):
     Project the velocity onto the mesh.
     """
     u_lagrange = element("Lagrange", mesh.basix_cell(), 1, shape=(mesh.geometry.dim,))
-    u_dg = element("DG", mesh.basix_cell(), 0, shape=(mesh.geometry.dim,))
+    # u_dg = element("DG", mesh.basix_cell(), 0, shape=(mesh.geometry.dim,))
 
-    # Define function spaces
+    # # Define function spaces
+    # W = dfx.fem.functionspace(mesh, u_lagrange) # lagrange function space
+    # V = dfx.fem.functionspace(mesh, u_dg) # DG Velocity space
+
+    # vel = dfx.fem.Function(V)  # Create a function in the DG space
+    # # vel.x.array[:] = velocity.flatten()  # Set the velocity values
+
+    # # Ensure velocity array matches the function layout
+    # dofmap = V.dofmap
+    # assert velocity.shape[0] == V.dofmap.index_map.size_local, (
+    #     f"Velocity shape mismatch: expected {V.dofmap.index_map.size_local}, got {velocity.shape[0]}"
+    # )
+
+    # # Flatten in correct order (component-major)
+    # vel.x.array[:] = velocity.reshape(-1)
+
+    # projector = Projector(W)
+    # u_proj = projector(vel)  # Project the velocity onto the mesh
+
+    #  Define function spaces
     W = dfx.fem.functionspace(mesh, u_lagrange) # lagrange function space
-    V = dfx.fem.functionspace(mesh, u_dg) # DG Velocity space
-
-    vel = dfx.fem.Function(V)  # Create a function in the DG space
-    # vel.x.array[:] = velocity.flatten()  # Set the velocity values
-
-    # Ensure velocity array matches the function layout
-    dofmap = V.dofmap
-    assert velocity.shape[0] == V.dofmap.index_map.size_local, (
-        f"Velocity shape mismatch: expected {V.dofmap.index_map.size_local}, got {velocity.shape[0]}"
-    )
-
-    # Flatten in correct order (component-major)
-    vel.x.array[:] = velocity.reshape(-1)
-
-    projector = Projector(W)
-    u_proj = projector(vel)  # Project the velocity onto the mesh
+    u_proj = dfx.fem.Function(W)  # Create a function in the Lagrange space
+    u_proj.x.array[:] = velocity.flatten()  # Set the velocity values    
 
     # Write the projected velocity to a file
     if mesh.comm.rank == 0:
@@ -262,7 +267,7 @@ class Transport:
         a_supg = v_supg * (c / deltaT + dot(self.u, grad(c)) - self.D * div(grad(c))) * self.dx
         L_supg = v_supg * (self.c_ / deltaT + f) * self.dx
 
-        # Impose BC using Nitsche's method
+        # Impose BC using Nitsche's method--- NEED TO FIX
         a_nitsche = nitsche('+') / hf('+') * c('+') * w('+') * self.dS(1)
         L_nitsche = nitsche('+') / hf('+') * self.bc_func('+') * w('+')* self.dS(1)
 
@@ -440,7 +445,7 @@ class Projector():
 
 if __name__ == "__main__":
     # Example usage
-    transport_solver = Transport(vel_file="../perfusion/u_p0_000000.vtu",
+    transport_solver = Transport(vel_file="../single-compartment/u_p0_000000.vtu",
                                  xdmf_file = "../geometry/vertex_tags_nearest.xdmf",
                                   T=1.0, dt=0.01, D_value=1e-2, element_degree=1, write_output=True)
     transport_solver.setup()

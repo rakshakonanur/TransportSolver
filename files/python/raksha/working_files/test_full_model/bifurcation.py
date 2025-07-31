@@ -55,8 +55,8 @@ class Bifurcation:
         # self.mesh = create_interval(MPI.COMM_WORLD, self.N, [0.0, L])
         self.convert_mesh()
         if user_velocity:
-            # self.load_vtp()
-            # self.centerlineVelocity()
+            self.load_vtp()
+            self.centerlineVelocity()
             self.import_velocity()
             self.results_to_vtk() # save the results to a VTK file
         else:
@@ -173,6 +173,7 @@ class Bifurcation:
         # Iterate over each timestep in the data series
         self.centerlineVel = []  # initialize as a list
         self.centerlineFlow = []  # initialize as a list
+        self.pressure = []  # initialize as a list
 
         from scipy.spatial import cKDTree
 
@@ -182,6 +183,7 @@ class Bifurcation:
             self.area = self.data_series[i]["point_data"]["Area"]  # (N,)
             flowrate_1d = self.data_series[i]["point_data"]["Flowrate"]  # (N,)
             reynolds_1d = self.data_series[i]["point_data"]["Reynolds"]  # (N,)
+            pressure_1d = self.data_series[i]["point_data"]["Pressure_mmHg"]  # (N,)
             self.mesh_3d_coords = self.data_series[i]["coords"]  # (N, 3)
             
             velocity_1d = flowrate_1d/self.area # calculate velocity from flowrate and area
@@ -190,11 +192,13 @@ class Bifurcation:
             self.centerlineFlow.append(centerlineFlowrate) # save the flowrate values for each timestep in each row
 
             self.centerlineVel.append(centerline)# save the velocity values for each timestep in each row
+            self.pressure.append(pressure_1d[::points_per_section]) # save the pressure values for each timestep in each row
             self.centerlineCoords = self.mesh_3d_coords.reshape(-1, points_per_section, 3).mean(axis=1)
             
             output = pv.PolyData(self.centerlineCoords)
 
             output["Velocity_Magnitude"] = centerline
+            output["Pressure_mmHg"] = pressure_1d[::points_per_section]
             output.save(f"output/averagedVelocity_{i:04d}.vtp")
 
 

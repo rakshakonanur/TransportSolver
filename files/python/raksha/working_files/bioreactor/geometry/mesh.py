@@ -11,7 +11,11 @@ import branch
 import logging
 logger = logging.getLogger(__name__)
 from pathlib import Path
-import adios4dolfinx
+import glob
+import re
+from vtk.util.numpy_support import vtk_to_numpy
+from basix.ufl import element
+import pyvista as pv
 
 WALL = 0
 OUTLET = 1
@@ -102,8 +106,6 @@ def xdmf_to_dolfinx(xdmf_file):
     # Create connectivity between the mesh elements and their facets
     mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
 
-    return mesh
-
 def convert_mesh(msh_file, xdmf_file):
     """
     Read the mesh from a file and convert it to XDMF format.
@@ -131,6 +133,7 @@ def convert_mesh(msh_file, xdmf_file):
     line_mesh.write(xdmf_file)
 
 def branch_mesh_tagging(mesh):
+    
     fdim = mesh.topology.dim - 1
 
     mesh.topology.create_connectivity(fdim, mesh.topology.dim)
@@ -153,15 +156,156 @@ def branch_mesh_tagging(mesh):
     print("Facet indices: ", facet_indices, flush=True)
     print("Facet markers: ", facet_markers, flush=True)
 
-    with dfx.io.XDMFFile(mesh.comm, "branch_facet_tags.xdmf", "w") as xdmf:
-        xdmf.write_mesh(mesh)
-        xdmf.write_meshtags(facet_tag, mesh.geometry)
-
     # Return outlet coordinates
     outlet_coords = mesh.geometry.x[facet_tag.indices[facet_tag.values == 2]]
     print("Outlet coordinates: ", outlet_coords, flush=True)
 
+    return outlet_coords, facet_tag
+
+def generate_1d_files(xdmf_file, output_dir):
+
+    # Load the converted XDMF mesh
+    with XDMFFile(MPI.COMM_WORLD, xdmf_file, "r") as xdmf:
+        mesh = xdmf.read_mesh(name="Grid")
+
+    P1 = dfx.fem.functionspace(mesh, ("CG", 1))  # Continuous Lagrange, degree 1
+    P1_vec = element("Lagrange", mesh.basix_cell(), 1, shape=(mesh.geometry.dim,))
+    P1vec = dfx.fem.functionspace(mesh, P1_vec)  # Vector space for velocity
+    dof_coords = P1.tabulate_dof_coordinates()
+    num_dofs = dof_coords.shape[0]
+
+    velocity_fn = dfx.fem.Function(P1vec)
+    pressure_fn = dfx.fem.Function(P1)
+
+    centerlineVel, centerlineFlow, pressure, centerlineCoords = load_vtp(output_dir)
+    Nt = len(centerlineVel)  # Number of timesteps
+
+    xdmf_vel = dfx.io.XDMFFile(mesh.comm, "velocity.xdmf", "w")
+    xdmf_pressure = dfx.io.XDMFFile(mesh.comm, "pressure.xdmf", "w")
+
+    xdmf_vel.write_mesh(mesh)
+    xdmf_pressure.write_mesh(mesh)
+
+    fdim = mesh.topology.dim - 1
+
+    mesh.topology.create_connectivity(fdim, mesh.topology.dim)
+    outlet_coords, facet_tag = branch_mesh_tagging(mesh)
+    xdmf_vel.write_meshtags(facet_tag, mesh.geometry)
+    xdmf_pressure.write_meshtags(facet_tag, mesh.geometry)
+
+    # Allocate u_val as a 2D array for all timesteps and dofs
+    u_val = np.zeros((Nt, num_dofs))
+
+    # Create connectivity between the mesh elements and their facets
+    mesh.topology.create_connectivity(mesh.topology.dim,
+                                       mesh.topology.dim - 1)
+
+    # Commenting out nearest neighbor search
+    tree = None  # KDTree for nearest neighbor search
+    dt = 1
+    
+    for i in range(Nt):
+        time = i * dt
+        points = centerlineCoords  # Get the points for the current timestep
+        scalar_velocity = centerlineVel[time]  # Get the velocity for the current timestep
+        scalar_pressure = pressure[time]  # Get the pressure for the current timestep
+
+        if tree is None:
+            tree = cKDTree(points)
+
+        # Nearest neighbor interpolation
+        distances, indices = tree.query(dof_coords)
+        interpolated_velocity = scalar_velocity[indices]
+        interpolated_pressure = scalar_pressure[indices]
+
+        # Compute tangents using the next connected point
+        tangents = np.zeros((len(indices), 3))
+        for j, idx in enumerate(indices):
+            # Simple forward difference: pick next point if possible, else previous
+            if idx < len(points) - 1:
+                delta = points[idx + 1] - points[idx]
+            else:
+                delta = points[idx] - points[idx - 1]
+            tangent = delta / np.linalg.norm(delta)
+            tangents[j] = tangent
+
+        # Assign to velocity function
+        velocity_fn.x.array[:] = (interpolated_velocity[:, np.newaxis] * tangents).flatten()
+        pressure_fn.x.array[:] = interpolated_pressure
+
+        # --- Write data to file with time stamp ---
+
+        xdmf_vel.write_function(velocity_fn, time)
+        xdmf_pressure.write_function(pressure_fn, time)
+
     return outlet_coords
+
+    
+def load_vtp(directory):
+    def extract_arrays(data_obj):
+        return {
+            data_obj.GetArray(i).GetName(): vtk_to_numpy(data_obj.GetArray(i))
+            for i in range(data_obj.GetNumberOfArrays())
+        }
+
+    # Find all model files in the specified directory
+    print("Searching for model files in directory:", directory)
+    
+    # Get a sorted list of all VTP files
+    vtp_files = sorted(glob.glob(os.path.join(directory, "*.vtp")), key=lambda x: int(re.findall(r'\d+', x)[-1]))
+    all_data = []
+    points_per_section = 20  # Number of points per section to average
+
+    centerlineVel = []  # initialize as a list
+    centerlineFlow = []  # initialize as a list
+    pressure = []  # initialize as a list
+
+    for file in vtp_files:
+        print(f"Reading: {file}")
+        reader = vtk.vtkXMLPolyDataReader()
+        reader.SetFileName(file)
+        reader.Update()
+        polydata = reader.GetOutput()
+
+        def extract_arrays(data_obj):
+            return {
+                data_obj.GetArray(i).GetName(): vtk_to_numpy(data_obj.GetArray(i))
+                for i in range(data_obj.GetNumberOfArrays())
+            }
+        
+        # Extract point coordinates
+        points = polydata.GetPoints()
+
+        # Convert to NumPy array
+        num_points = points.GetNumberOfPoints()
+
+        timestep_data = {
+            "filename": file,
+            "coords": np.array([points.GetPoint(i) for i in range(num_points)]),
+            "point_data": extract_arrays(polydata.GetPointData()),
+            "cell_data": extract_arrays(polydata.GetCellData()),
+            "field_data": extract_arrays(polydata.GetFieldData())
+        }
+
+
+        area = timestep_data["point_data"]["Area"]  # (N,)
+        flowrate_1d = timestep_data["point_data"]["Flowrate"]  # (N,)
+        reynolds_1d = timestep_data["point_data"]["Reynolds"]  # (N,)
+        pressure_1d = timestep_data["point_data"]["Pressure_mmHg"]  # (N,)
+        mesh_3d_coords = timestep_data["coords"]  # (N, 3)
+
+        velocity_1d = flowrate_1d/area # calculate velocity from flowrate and area
+        centerline = velocity_1d[::points_per_section] # save only one point for each cross-section
+        centerlineFlowrate = flowrate_1d[::points_per_section] # save only one point for each cross-section
+        centerlineFlow.append(centerlineFlowrate) # save the flowrate values for each timestep in each row
+
+        centerlineVel.append(centerline)# save the velocity values for each timestep in each row
+        pressure.append(pressure_1d[::points_per_section]) # save the pressure values for each timestep in each row
+        centerlineCoords = mesh_3d_coords.reshape(-1, points_per_section, 3).mean(axis=1)
+
+
+    return centerlineVel, centerlineFlow, pressure, centerlineCoords
+
 
 def domain_mesh_tagging(mesh, coords, tag_value=1, tol=5e-3):
 
@@ -204,7 +348,7 @@ def domain_mesh_tagging(mesh, coords, tag_value=1, tol=5e-3):
 
 from scipy.spatial import cKDTree
 
-def domain_mesh_tagging_nearest(mesh, coords):
+def domain_mesh_tagging_nearest(xdmf_file, coords):
     """
     Tag the nearest vertex in the mesh to each coordinate in coords.
 
@@ -216,6 +360,13 @@ def domain_mesh_tagging_nearest(mesh, coords):
     Returns:
         dolfinx.mesh.meshtags: Vertex tags
     """
+
+    with XDMFFile(MPI.COMM_WORLD, xdmf_file, "r") as xdmf:
+        mesh = xdmf.read_mesh(name="Grid")
+    
+    mesh.topology.create_connectivity(0, mesh.topology.dim)
+    mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
+
     vdim = 0  # Vertex dimension
     fdim = mesh.topology.dim - 1  # Facet dimension
     mesh_coords = mesh.geometry.x
@@ -238,7 +389,7 @@ def domain_mesh_tagging_nearest(mesh, coords):
     mesh.topology.create_connectivity(0, mesh.topology.dim)
 
     # Write to file
-    with dfx.io.XDMFFile(mesh.comm, "vertex_tags_nearest.xdmf", "w") as xdmf:
+    with dfx.io.XDMFFile(mesh.comm, xdmf_file, "w") as xdmf:
         xdmf.write_mesh(mesh)
         xdmf.write_meshtags(vertex_tags, mesh.geometry)
 
@@ -253,22 +404,21 @@ def import_branched_mesh(branching_data_file, geo_file="branched_network.geo", m
     branch.write_geo_from_branching_data(df, geo_file=geo_file)
     geo_to_mesh_gmsh(geo_file=geo_file, msh_file=msh_file)
     convert_mesh(msh_file=msh_file, xdmf_file=xdmf_file)
-    mesh = xdmf_to_dolfinx(xdmf_file=xdmf_file)
-    outlet_coords = branch_mesh_tagging(mesh)
-    return mesh, outlet_coords
+    xdmf_to_dolfinx(xdmf_file=xdmf_file)
+    outlet_coords = generate_1d_files(xdmf_file=xdmf_file, output_dir="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/071725/Run5_25branches")
+    return outlet_coords
 
 def create_bioreactor_mesh(stl_file, msh_file="bioreactor.msh", xdmf_file="bioreactor.xdmf", diric=None):
     stl_to_mesh_gmsh(stl_file, msh_file=msh_file)
     mesh_to_xdmf(msh_file=msh_file, xdmf_file=xdmf_file)
-    mesh = xdmf_to_dolfinx(xdmf_file=xdmf_file)
-    facet_tags = domain_mesh_tagging_nearest(mesh, diric)
-    return mesh, facet_tags
+    xdmf_to_dolfinx(xdmf_file=xdmf_file)
+    facet_tags = domain_mesh_tagging_nearest(xdmf_file=xdmf_file, coords=diric)
 
 
-class PerfusionSolver():
+class Files():
     def __init__(self, stl_file, branching_data_file):
-        self.mesh, dirichlet = import_branched_mesh(branching_data_file)
-        self.mesh, facet_tags = create_bioreactor_mesh(stl_file, diric=dirichlet)
+        dirichlet = import_branched_mesh(branching_data_file)
+        create_bioreactor_mesh(stl_file, diric=dirichlet)
         self.D_value = 1e-2  # Diffusion coefficient
         self.element_degree = 1  # Polynomial degree for finite elements
         self.write_output = True  # Whether to write output files   
@@ -276,7 +426,7 @@ class PerfusionSolver():
 
 
 if __name__ == "__main__":
-    perfusion = PerfusionSolver(stl_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/syntheticVasculature/files/geometry/cermRaksha_scaled.stl",
+    perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/syntheticVasculature/files/geometry/cermRaksha_scaled.stl",
                                 branching_data_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/071725/Run5_25branches/1D_Input_Files/branchingData.csv")
 
 

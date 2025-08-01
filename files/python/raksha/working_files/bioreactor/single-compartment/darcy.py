@@ -4,6 +4,8 @@ import dolfinx as dfx
 import matplotlib.pyplot as plt
 import os
 import pyvista as pv
+import vtk
+from vtk.util.numpy_support import vtk_to_numpy
 
 from scipy.spatial     import cKDTree
 from ufl               import avg, jump, dot, grad
@@ -28,6 +30,9 @@ OUTLET = 1
 """
     From the DOLFINx tutorial: Mixed formulation of the Poisson equation
     https://docs.fenicsproject.org/dolfinx/v0.7.2/python/demos/demo_mixed-poisson.html
+
+    Weak imposition of Dirichlet boundary conditions using Nitsche's method:
+    https://jsdokken.com/dolfinx-tutorial/chapter1/nitsche.html
 """
 
 # Set compiler options for runtime optimization
@@ -50,137 +55,30 @@ def import_mesh(xdmf_file):
 
     return mesh, vertex_tags
 
-def outlet_velocity_tagging(mesh):
-    fdim = mesh.topology.dim - 1
-    mesh.topology.create_connectivity(fdim, mesh.topology.dim)
-    boundary_facets_indices = dfx.mesh.exterior_facet_indices(mesh.topology)
-    inlet = np.array([0,0.41,0.34]) #updated with units
-    tol = 1e-6
+def import_function(mesh, velocity_file, pressure_file):
+    """
+    Import a function from a BP file.
+    """
 
-    def near_inlet(x):
-        return np.isclose(x[0],inlet[0]) & np.isclose(x[1],inlet[1]) & np.isclose(x[2],inlet[2])
+    # Create function spaces
+    P1 = dfx.fem.functionspace(mesh, element("Lagrange", mesh.basix_cell(), 1))
+    P1_vec = element("Lagrange", mesh.basix_cell(), 1, shape=(mesh.geometry.dim,))
+    P1vec = dfx.fem.functionspace(mesh, P1_vec)
 
-    inlet_facets = dfx.mesh.locate_entities_boundary(mesh, fdim, near_inlet)
+    u_in = dfx.fem.Function(P1vec)
+    p_in = dfx.fem.Function(P1)
 
-    # Extract outlet facets: boundary facets excluding inlet facets
-    outlet_facets = np.setdiff1d(boundary_facets_indices, inlet_facets)
+    for i, timestamp in enumerate(adios4dolfinx.read_timestamps(velocity_file, comm=MPI.COMM_WORLD, function_name="f")):
+        adios4dolfinx.read_function(velocity_file, u_in, time=timestamp, name="f")
+        adios4dolfinx.read_function(pressure_file, p_in, time=timestamp, name="f")
+        print(
+            f"{MPI.COMM_WORLD.rank + 1}/{MPI.COMM_WORLD.size}: ",
+            f"Function read in correctly at time {timestamp}",
+        )
 
-    # inlet_facets = [boundary_facets_indices[0]] # first element corresponds to inlet
-    # outlet_facets = boundary_facets_indices[1:] # all other elements correspond to outlets
-
-    facet_indices = np.concatenate([inlet_facets, outlet_facets])
-    facet_markers = np.concatenate([np.full(len(inlet_facets), 1, dtype=np.int32),
-                                    np.full(len(outlet_facets), 2, dtype=np.int32)])
-    facet_tag = dfx.mesh.meshtags(mesh, fdim, facet_indices, facet_markers)
-    print("Facet indices: ", facet_indices, flush=True)
-    print("Facet markers: ", facet_markers, flush=True)
-    return inlet_facets, outlet_facets, facet_tag
-
-def branch_mesh_tagging():
-
-    xdmf_file = "../../test_full_model/bifurcation.xdmf"
-    with XDMFFile(MPI.COMM_WORLD, xdmf_file, "r") as xdmf:
-        mesh = xdmf.read_mesh(name="Grid")
-        mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
-
-    _, branch_outlet_facets, branch_facet_tag = outlet_velocity_tagging(mesh)
-    u_val, pressure, outlet_coords = import_ns(mesh, branch_outlet_facets, branch_facet_tag)
-    return u_val, pressure, outlet_coords   
-
-def import_ns(mesh, outlet_facets, facet_tag):
     
-    # Load the averagedVelocity files for all time steps
-    tree = None  # KDTree for nearest neighbor search
-    num_timesteps = 11  # hard-coded for now, can be replaced with dynamic loading
-    dt = 1
-    output_path = "/Users/rakshakonanur/Documents/Research/Transport_Solver/TransportSolver/files/python/raksha/working_files/test_full_model/output"
-    
-    fdim = mesh.topology.dim - 1
 
-    # Create scalar P1 function space
-    P1 = element("CG", mesh.basix_cell(), 1)
-    V = dfx.fem.functionspace(mesh, P1)
-    # u_val = Function(V)
-
-    # === Get coordinates of mesh dofs ===
-    dof_coords = V.tabulate_dof_coordinates()
-    outlet_coords = dof_coords[facet_tag.find(2)]  # Coordinates of outlet facets
-    num_dofs = len(outlet_facets)
-
-    # Allocate u_val as a 2D array for all timesteps and dofs
-    u_val = np.zeros((num_timesteps, num_dofs))
-    pressure = np.zeros((num_timesteps, num_dofs))  # Initialize pressure array
-
-    # Step 1: Map outlet facets to their adjacent cells (1 per facet in DG)
-    facet_to_cell = mesh.topology.connectivity(fdim, mesh.topology.dim)
-    outlet_cells = np.array([facet_to_cell.links(f)[0] for f in outlet_facets], dtype=np.int32)
-
-    # Step 2: Get tangents for these cells
-    _, tangents = compute_element_tangents()  # tangents.shape == (num_cells, 3)
-    outlet_tangents = tangents[outlet_cells]  # shape: (num_outlet_facets, 3)
-
-    for i in range(num_timesteps):
-        time = i * dt
-        vtp_file = os.path.join(output_path + f"/averagedVelocity_{i:04d}.vtp")
-        print(f"Processing timestep {i}: {vtp_file}", flush=True)
-
-        # --- Load VTP and extract data ---
-        vtp = pv.read(vtp_file)
-        vtp_points = vtp.points
-        scalar_velocity = vtp.point_data["Velocity_Magnitude"]
-        scalar_pressure = vtp.point_data["Pressure_mmHg"]  
-        
-        if tree is None:
-            tree = cKDTree(vtp_points)
-
-        # Nearest neighbor interpolation
-        distances, indices = tree.query(outlet_coords)
-        interpolated_vel = scalar_velocity[indices]
-        interpolated_pressure = scalar_pressure[indices] 
-
-        u_val[i,:] = interpolated_vel
-        pressure[i,:] = interpolated_pressure
-        print(f"Interpolated values for timestep {i}: {interpolated_vel}", flush=True)
-        print(f"Interpolated pressure for timestep {i}: {interpolated_pressure}", flush=True)
-
-    # Step 3: Multiply scalar velocity magnitudes by tangents to get vector velocity
-    # u_val.shape = (num_timesteps, num_outlet_facets)
-    # vector_u_val.shape = (num_timesteps, num_outlet_facets, 3)
-    vector_u_val = u_val[:, :, np.newaxis] * outlet_tangents[np.newaxis, :, :]
-
-    print("Vector-valued outlet velocities shape:", vector_u_val.shape)
-
-    return vector_u_val, pressure, outlet_coords
-
-def compute_element_tangents():
-        """Compute unit tangent vectors for each cell in a 1D mesh."""
-        import numpy.linalg as la
-
-        xdmf_file = "../../test_full_model/bifurcation.xdmf"
-        with XDMFFile(MPI.COMM_WORLD, xdmf_file, "r") as xdmf:
-            mesh = xdmf.read_mesh(name="Grid")
-            mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
-
-        mesh = mesh
-        dim = mesh.topology.dim
-
-        # Get cell indices and connectivity
-        cells = np.arange(mesh.topology.index_map(dim).size_local, dtype=np.int32)
-        conn = mesh.topology.connectivity(dim, 0)
-        cell_nodes = [conn.links(i) for i in cells]
-
-        # Access node coordinates
-        coords = mesh.geometry.x
-
-        tangents = []
-        for nodes in cell_nodes:
-            p0 = coords[nodes[0]]
-            p1 = coords[nodes[1]]
-            delta = p1 - p0
-            tangent = delta / la.norm(delta)
-            tangents.append(tangent)
-            
-        return cells, np.array(tangents)       
+    return u_in, p_in    
 
 def convert_vertex_tags_to_facet_tags(mesh, vertex_tags, u_vec):
     """
@@ -312,15 +210,16 @@ def single_compartment(self, mesh, velocity_facets, M, W, p):
     return beta_src_c * Psrc_c + beta_snk_c * Psnk_c, - p * (beta_src_c + beta_snk_c)
 
 class PerfusionSolver:
-    def __init__(self, xdmf_file: str):
+    def __init__(self, mesh_tag_file: str, velocity_file: str, pressure_file: str):
         """
         Initialize the PerfusionSolver with a given STL file and branching data.
         """
         self.D_value = 1e-2
         self.element_degree = 1
         self.write_output = True
-        self.u_vec, self.p_out, self.outlet_coords = branch_mesh_tagging()
-        self.mesh, self.vertex_tags = import_mesh(xdmf_file)
+        # self.u_vec, self.p_out, self.outlet_coords = branch_mesh_tagging()
+        self.mesh, self.vertex_tags = import_mesh(mesh_tag_file)
+        self.velocity, self.pressure = import_function(self.mesh, velocity_file, pressure_file)
         self.internal_tags, self.external_tags, self.velocity_facets, self.u_vec = convert_vertex_tags_to_facet_tags(self.mesh, self.vertex_tags, self.u_vec)
 
         self.t = 0
@@ -476,8 +375,10 @@ class PerfusionSolver:
 
 if __name__ == "__main__":
     # Example usage
-    xdmf_file = "../geometry/vertex_tags_nearest.xdmf"
-    solver = PerfusionSolver(xdmf_file)
+    mesh_tag_file = "../geometry/tagged_branches.xdmf"
+    vel_file = "../geometry/velocity_checkpoint.bp"
+    pressure_file = "../geometry/pressure_checkpoint.bp"
+    solver = PerfusionSolver(mesh_tag_file, vel_file, pressure_file)
     solver.setup()
     print("PerfusionSolver setup complete.")
 

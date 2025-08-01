@@ -16,6 +16,7 @@ import re
 from vtk.util.numpy_support import vtk_to_numpy
 from basix.ufl import element
 import pyvista as pv
+import adios4dolfinx
 
 WALL = 0
 OUTLET = 1
@@ -180,18 +181,13 @@ def generate_1d_files(xdmf_file, output_dir):
     centerlineVel, centerlineFlow, pressure, centerlineCoords = load_vtp(output_dir)
     Nt = len(centerlineVel)  # Number of timesteps
 
-    xdmf_vel = dfx.io.XDMFFile(mesh.comm, "velocity.xdmf", "w")
-    xdmf_pressure = dfx.io.XDMFFile(mesh.comm, "pressure.xdmf", "w")
-
-    xdmf_vel.write_mesh(mesh)
-    xdmf_pressure.write_mesh(mesh)
-
     fdim = mesh.topology.dim - 1
 
     mesh.topology.create_connectivity(fdim, mesh.topology.dim)
     outlet_coords, facet_tag = branch_mesh_tagging(mesh)
-    xdmf_vel.write_meshtags(facet_tag, mesh.geometry)
-    xdmf_pressure.write_meshtags(facet_tag, mesh.geometry)
+    with dfx.io.XDMFFile(MPI.COMM_WORLD, "tagged_branches.xdmf", "w") as xdmf:
+        xdmf.write_mesh(mesh)
+        xdmf.write_meshtags(facet_tag, mesh.geometry)
 
     # Allocate u_val as a 2D array for all timesteps and dofs
     u_val = np.zeros((Nt, num_dofs))
@@ -199,7 +195,18 @@ def generate_1d_files(xdmf_file, output_dir):
     # Create connectivity between the mesh elements and their facets
     mesh.topology.create_connectivity(mesh.topology.dim,
                                        mesh.topology.dim - 1)
-
+    
+    vtx_vel = dfx.io.VTXWriter(
+        MPI.COMM_WORLD, "velocity.bp", [velocity_fn], engine="BP4"
+    )
+    
+    vtx_pres = dfx.io.VTXWriter(
+        MPI.COMM_WORLD, "pressure.bp", [pressure_fn], engine="BP4"
+    )
+    vtx_vel.write(0.0)
+    vtx_pres.write(0.0)
+    # adios4dolfinx.write_mesh(Path("velocity.bp"), mesh, engine="BP4")
+    # adios4dolfinx.write_mesh(Path("pressure.bp"), mesh, engine="BP4")
     # Commenting out nearest neighbor search
     tree = None  # KDTree for nearest neighbor search
     dt = 1
@@ -232,11 +239,23 @@ def generate_1d_files(xdmf_file, output_dir):
         # Assign to velocity function
         velocity_fn.x.array[:] = (interpolated_velocity[:, np.newaxis] * tangents).flatten()
         pressure_fn.x.array[:] = interpolated_pressure
+        adios4dolfinx.write_function(
+            Path("velocity_checkpoint.bp"),
+            u = velocity_fn,
+            time=float(time),
+            name="f")
+        adios4dolfinx.write_function(
+            Path("pressure_checkpoint.bp"),
+            u = pressure_fn,
+            time=float(time),
+            name="f")
 
         # --- Write data to file with time stamp ---
+        vtx_vel.write(float(time))
+        vtx_pres.write(float(time))
 
-        xdmf_vel.write_function(velocity_fn, time)
-        xdmf_pressure.write_function(pressure_fn, time)
+    vtx_vel.close()
+    vtx_pres.close()
 
     return outlet_coords
 

@@ -18,7 +18,7 @@ from basix.ufl import element
 import pyvista as pv
 import adios4dolfinx
 
-WALL = 0
+WALL = 2
 OUTLET = 1
 
 def _get_ftetwild_path():
@@ -163,6 +163,89 @@ def branch_mesh_tagging(mesh):
 
     return outlet_coords, facet_tag
 
+def convert_vertex_tags_to_facet_tags(mesh, vertex_tags):
+    """
+    Convert vertex-based tags (dim=0) to facet-based tags (dim=dim-1),
+    and reduce u_vec to assign only one facet per tagged vertex.
+    """
+
+    # with XDMFFile(MPI.COMM_WORLD, xdmf_file, "r") as xdmf:
+    #     mesh = xdmf.read_mesh(name="Grid")
+
+    tdim = mesh.topology.dim
+    fdim = tdim - 1
+    mesh.topology.create_connectivity(fdim, 0)  # facet -> vertex
+    mesh.topology.create_connectivity(fdim, tdim)  # facet -> cell
+
+    facet_to_vertex = mesh.topology.connectivity(fdim, 0)
+    vertex_to_facet = {}
+
+    facet_indices = []
+    facet_values = []
+    total_facets, total_values, sorted_facets = [],[],[]
+    used_facets = set()
+    used_vertices = set()
+
+    for facet in range(mesh.topology.index_map(fdim).size_local):
+        vertex_ids = facet_to_vertex.links(facet)
+        tags_on_vertices = vertex_tags.values[np.isin(vertex_tags.indices, vertex_ids)]
+
+        if len(tags_on_vertices) > 0:
+            # Assign tag only if vertex hasn't been used
+            for v_id in vertex_ids:
+                if v_id in vertex_tags.indices and v_id not in used_vertices:
+                    tag = np.bincount(tags_on_vertices).argmax()
+                    facet_indices.append(facet)
+                    facet_values.append(tag)
+                    used_vertices.add(v_id)
+                    used_facets.add(facet)
+                    break  # Only one facet per vertex
+    
+    total_facets.append(facet_indices)
+    total_values.append(np.full_like(facet_indices, OUTLET))  # Tag 0 for internal facets
+    facet_indices = np.array(facet_indices, dtype=np.int32)
+    facet_values = np.array(facet_values, dtype=np.int32)
+    sorted_indices = np.argsort(facet_indices)
+    internal_tags = dfx.mesh.meshtags(mesh, fdim, facet_indices[sorted_indices], facet_values[sorted_indices])
+
+    # Determine the wall facets
+    wall_BC_indices, wall_BC_markers = [], []
+    wall_BC_facets = dfx.mesh.exterior_facet_indices(mesh.topology)
+    total_facets.append(wall_BC_facets)
+    total_values.append(np.full_like(wall_BC_facets, WALL)) # Tag 0 for wall BCs
+    wall_BC_indices.append(wall_BC_facets)
+    wall_BC_markers.append(np.full_like(wall_BC_facets, WALL))  # Tag 0 for wall BCs
+
+    wall_BC_indices = np.hstack(wall_BC_indices).astype(np.int32)  # Ensure facets are in int32 format
+    wall_BC_markers = np.hstack(wall_BC_markers).astype(np.int32)  # Ensure markers are in int32 format
+    sorted_facets = np.argsort(wall_BC_indices)
+    external_tags = dfx.mesh.meshtags(mesh, fdim, wall_BC_indices[sorted_facets], wall_BC_markers[sorted_facets])
+    print("External facets for wall BCs:", wall_BC_indices, flush=True)
+
+    # Remove external facets from facet_indices and facet_values
+    sorted_facets = np.argsort(facet_indices)
+    velocity_facets = dfx.mesh.meshtags(mesh, fdim, facet_indices[sorted_facets], facet_values[sorted_facets])
+    facet_indices = np.setdiff1d(facet_indices, wall_BC_indices)
+    facet_values = np.setdiff1d(facet_values, wall_BC_markers)
+    print("Internal facets after removing wall BCs:", facet_indices, flush=True)
+
+    # Save both meshtags for visualization
+    total_values = np.hstack(total_values).astype(np.int32)
+    total_facets = np.hstack(total_facets).astype(np.int32)
+    sorted_facets = np.argsort(total_facets)
+    print("Total facets:", total_facets[sorted_facets], flush=True)
+
+    # Write mesh and tags to output files
+    if mesh.comm.rank == 0:
+        out_str = 'mesh_tags.xdmf'
+        with XDMFFile(mesh.comm, out_str, 'w') as xdmf_out:
+            xdmf_out.write_mesh(mesh)
+            mesh.topology.create_connectivity(fdim, tdim)
+            xdmf_out.write_meshtags(
+                dfx.mesh.meshtags(mesh, fdim, total_facets[sorted_facets], total_values[sorted_facets]),
+                mesh.geometry
+            )
+
 def generate_1d_files(xdmf_file, output_dir):
 
     # Load the converted XDMF mesh
@@ -188,6 +271,9 @@ def generate_1d_files(xdmf_file, output_dir):
     with dfx.io.XDMFFile(MPI.COMM_WORLD, "tagged_branches.xdmf", "w") as xdmf:
         xdmf.write_mesh(mesh)
         xdmf.write_meshtags(facet_tag, mesh.geometry)
+
+    adios4dolfinx.write_mesh(Path("tagged_branches.bp"), mesh, engine="BP4")
+    adios4dolfinx.write_meshtags(Path("tagged_branches.bp"), mesh, facet_tag, engine="BP4")
 
     # Allocate u_val as a 2D array for all timesteps and dofs
     u_val = np.zeros((Nt, num_dofs))
@@ -416,7 +502,7 @@ def domain_mesh_tagging_nearest(xdmf_file, coords):
         print(f"Tagged facets: {vertex_tags.indices.size}")
 
 
-    return vertex_tags
+    return vertex_tags, mesh
 
 def import_branched_mesh(branching_data_file, geo_file="branched_network.geo", msh_file="branched_network.msh", xdmf_file="branched_network.xdmf"):
     df = pd.read_csv(branching_data_file)
@@ -431,7 +517,8 @@ def create_bioreactor_mesh(stl_file, msh_file="bioreactor.msh", xdmf_file="biore
     stl_to_mesh_gmsh(stl_file, msh_file=msh_file)
     mesh_to_xdmf(msh_file=msh_file, xdmf_file=xdmf_file)
     xdmf_to_dolfinx(xdmf_file=xdmf_file)
-    facet_tags = domain_mesh_tagging_nearest(xdmf_file=xdmf_file, coords=diric)
+    facet_tags, mesh = domain_mesh_tagging_nearest(xdmf_file=xdmf_file, coords=diric)
+    convert_vertex_tags_to_facet_tags(mesh = mesh, vertex_tags=facet_tags)
 
 
 class Files():

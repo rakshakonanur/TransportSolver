@@ -51,129 +51,159 @@ def import_mesh(xdmf_file):
         mesh = xdmf.read_mesh(name="Grid")
         fdim = mesh.topology.dim - 1  # Facet dimension
         mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
-        vertex_tags = xdmf.read_meshtags(mesh, name="mesh_tags")
+        mesh_tags = xdmf.read_meshtags(mesh, name="mesh_tags")
 
-    return mesh, vertex_tags
+    return mesh, mesh_tags
 
-def import_function(mesh, velocity_file, pressure_file):
+def remove_tags(mesh, meshtags):
+    fdim = mesh.topology.dim - 1
+    mesh.topology.create_connectivity(fdim, 0)  # facet → vertex
+    facet_to_vertex = mesh.topology.connectivity(fdim, 0)
+
+    all_indices = meshtags.indices
+    all_values = meshtags.values
+
+    inlet = np.array([0.0, 0.41, 0.34])
+    coords = mesh.geometry.x
+
+    kept_indices = []
+    kept_values = []
+
+    for i, facet in enumerate(all_indices):
+        vertex_ids = facet_to_vertex.links(facet)
+        facet_coords = coords[vertex_ids]
+        centroid = np.mean(facet_coords, axis=0)
+        
+        # If this facet's centroid is NOT the inlet coordinate, keep it
+        if not np.allclose(centroid, inlet, atol=1e-6):
+            kept_indices.append(facet)
+            kept_values.append(all_values[i])
+
+    new_meshtags = dfx.mesh.meshtags(mesh, fdim, np.array(kept_indices, dtype=np.int32), np.array(kept_values, dtype=np.int32))
+    return new_meshtags
+
+
+def import_function(velocity_file, pressure_file, other_mesh, internal_facets, external_facets):
     """
     Import a function from a BP file.
     """
+
+    with XDMFFile(MPI.COMM_WORLD, "../geometry/branched_network.xdmf", "r") as xdmf:
+        mesh = xdmf.read_mesh(name="Grid")
+        mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
+
+    mesh = adios4dolfinx.read_mesh(filename = Path("../geometry/tagged_branches.bp"), comm=MPI.COMM_WORLD)
+    old_meshtags = adios4dolfinx.read_meshtags(filename = Path("../geometry/tagged_branches.bp"), mesh=mesh, meshtag_name="mesh_tags")
+    meshtags = remove_tags(mesh, old_meshtags)  # Remove tags with value 0
+
+    # Split vertex tags into internal and external facets
+    internal_1dfacets, external_1dfacets = split_vertex_tags_by_facet_tags(mesh, meshtags.indices, other_mesh, internal_facets, external_facets)
 
     # Create function spaces
     P1 = dfx.fem.functionspace(mesh, element("Lagrange", mesh.basix_cell(), 1))
     P1_vec = element("Lagrange", mesh.basix_cell(), 1, shape=(mesh.geometry.dim,))
     P1vec = dfx.fem.functionspace(mesh, P1_vec)
 
+    total_velocity = [] # store velocity data from all timesteps
+    total_pressure = [] # store pressure data from all timesteps
+
     u_in = dfx.fem.Function(P1vec)
     p_in = dfx.fem.Function(P1)
+    print(adios4dolfinx.read_timestamps(pressure_file, comm=MPI.COMM_WORLD, function_name="f").shape)
 
-    for i, timestamp in enumerate(adios4dolfinx.read_timestamps(velocity_file, comm=MPI.COMM_WORLD, function_name="f")):
+    for timestamp in adios4dolfinx.read_timestamps(pressure_file, comm=MPI.COMM_WORLD, function_name="f"):
         adios4dolfinx.read_function(velocity_file, u_in, time=timestamp, name="f")
         adios4dolfinx.read_function(pressure_file, p_in, time=timestamp, name="f")
-        print(
-            f"{MPI.COMM_WORLD.rank + 1}/{MPI.COMM_WORLD.size}: ",
-            f"Function read in correctly at time {timestamp}",
-        )
-
+        total_velocity.append(u_in.x.array.copy())
+        total_pressure.append(p_in.x.array.copy())
     
+    # vertex_indices = meshtags.indices[internal_1dfacets]  # Get indices of vertices tagged with 2
+    vertex_coords = mesh.geometry.x[internal_1dfacets]
 
-    return u_in, p_in    
+    return total_velocity, total_pressure, vertex_coords, meshtags, internal_1dfacets, external_1dfacets
 
-def convert_vertex_tags_to_facet_tags(mesh, vertex_tags, u_vec):
-    """
-    Convert vertex-based tags (dim=0) to facet-based tags (dim=dim-1),
-    and reduce u_vec to assign only one facet per tagged vertex.
-    """
-    tdim = mesh.topology.dim
-    fdim = tdim - 1
-    mesh.topology.create_connectivity(fdim, 0)  # facet -> vertex
-    mesh.topology.create_connectivity(fdim, tdim)  # facet -> cell
 
-    facet_to_vertex = mesh.topology.connectivity(fdim, 0)
-    vertex_to_facet = {}
+import numpy as np
+from scipy.spatial import cKDTree
 
-    facet_indices = []
-    facet_values = []
-    total_facets, total_values, sorted_facets = [],[],[]
-    used_facets = set()
-    used_vertices = set()
+def split_vertex_tags_by_facet_tags(
+    mesh, vertex_indices, other_mesh, other_mesh_internal_facets, other_mesh_external_facets):
 
-    for facet in range(mesh.topology.index_map(fdim).size_local):
-        vertex_ids = facet_to_vertex.links(facet)
-        tags_on_vertices = vertex_tags.values[np.isin(vertex_tags.indices, vertex_ids)]
-
-        if len(tags_on_vertices) > 0:
-            # Assign tag only if vertex hasn't been used
-            for v_id in vertex_ids:
-                if v_id in vertex_tags.indices and v_id not in used_vertices:
-                    tag = np.bincount(tags_on_vertices).argmax()
-                    facet_indices.append(facet)
-                    facet_values.append(tag)
-                    used_vertices.add(v_id)
-                    used_facets.add(facet)
-                    break  # Only one facet per vertex
+    fdim = other_mesh.topology.dim - 1
+    other_mesh.topology.create_connectivity(fdim, 0)
+    facet_to_vertex = other_mesh.topology.connectivity(fdim, 0)
     
-    total_facets.append(facet_indices)
-    total_values.append(np.full_like(facet_indices, OUTLET))  # Tag 0 for internal facets
+    # Get vertices connected to internal facets on other mesh
+    internal_vertices = set()
+    for facet in other_mesh_internal_facets.indices:
+        internal_vertices.update(facet_to_vertex.links(facet))
+    internal_coords = other_mesh.geometry.x[list(internal_vertices), :]
+    
+    # Get vertices connected to external facets on other mesh
+    external_vertices = set()
+    for facet in other_mesh_external_facets.indices:
+        external_vertices.update(facet_to_vertex.links(facet))
+    external_coords = other_mesh.geometry.x[list(external_vertices), :]
+    
+    # Build KD-trees
+    tree_internal = cKDTree(internal_coords)
+    tree_external = cKDTree(external_coords)
+    
+    # Coordinates of input vertex_indices on target mesh
+    coords = mesh.geometry.x[vertex_indices, :]
+    
+    # Query nearest distances
+    dist_internal, _ = tree_internal.query(coords)
+    dist_external, _ = tree_external.query(coords)
+    
+    # Classify indices by closer distance
+    is_internal = dist_internal <= dist_external
+    is_external = ~is_internal
+    
+    internal_indices = vertex_indices[is_internal]
+    external_indices = vertex_indices[is_external]
+
+    print(f"Internal indices: {internal_indices}, External indices: {external_indices}", flush=True)
+    
+    return internal_indices, external_indices
+
+def separate_tags(mesh, meshtags):
+    """
+    Separate vertex tags into internal and external facets.
+    """
+
+    fdim = mesh.topology.dim - 1  # Facet dimension
+
+    # External facets (on boundary)
+    boundary_facets = dfx.mesh.locate_entities_boundary(
+        mesh, fdim, lambda x: np.full(x.shape[1], True)
+    )
+    boundary_facets_set = set(boundary_facets)
+
+    facet_indices, facet_values = meshtags.indices[meshtags.values == 1], meshtags.values[meshtags.values == 1]
     facet_indices = np.array(facet_indices, dtype=np.int32)
-    facet_values = np.array(facet_values, dtype=np.int32)
-    sorted_indices = np.argsort(facet_indices)
-    internal_tags = dfx.mesh.meshtags(mesh, fdim, facet_indices[sorted_indices], facet_values[sorted_indices])
+    facet_values  = np.array(facet_values, dtype=np.int32)
 
-    # Rescale u_vec: keep only the rows corresponding to used_facets
-    used_facets = np.array(sorted(used_facets), dtype=np.int32)
-    # Build mapping from facet index → index in u_vec
-    facet_map = {facet: i for i, facet in enumerate(facet_indices)}
-    u_vec_rescaled = []
+    # Split into external/internal facets
+    is_boundary_facet = np.isin(facet_indices, boundary_facets)
 
-    for facet in used_facets:
-        i = facet_map[facet]  # Get index into u_vec
-        u_vec_rescaled.append(u_vec[:, i, :])  # shape (timesteps, 1, 3)
+    external_facet_indices = facet_indices[is_boundary_facet]
+    external_facet_values  = facet_values[is_boundary_facet]
 
-    # Stack to get shape: (timesteps, num_used_facets, 3)
-    u_vec_rescaled = np.stack(u_vec_rescaled, axis=1)
-    print("Rescaled u_vec shape:", u_vec_rescaled.shape, flush=True)
+    internal_facet_indices = facet_indices[~is_boundary_facet]
+    internal_facet_values  = facet_values[~is_boundary_facet]
 
-    # Determine the wall facets
-    wall_BC_indices, wall_BC_markers = [], []
-    wall_BC_facets = dfx.mesh.exterior_facet_indices(mesh.topology)
-    total_facets.append(wall_BC_facets)
-    total_values.append(np.full_like(wall_BC_facets, WALL)) # Tag 0 for wall BCs
-    wall_BC_indices.append(wall_BC_facets)
-    wall_BC_markers.append(np.full_like(wall_BC_facets, WALL))  # Tag 0 for wall BCs
+    # Create MeshTags
+    external_tags = dfx.mesh.meshtags(mesh, fdim, external_facet_indices, external_facet_values)
+    internal_tags = dfx.mesh.meshtags(mesh, fdim, internal_facet_indices, internal_facet_values)
 
-    wall_BC_indices = np.hstack(wall_BC_indices).astype(np.int32)  # Ensure facets are in int32 format
-    wall_BC_markers = np.hstack(wall_BC_markers).astype(np.int32)  # Ensure markers are in int32 format
-    sorted_facets = np.argsort(wall_BC_indices)
-    external_tags = dfx.mesh.meshtags(mesh, fdim, wall_BC_indices[sorted_facets], wall_BC_markers[sorted_facets])
-    print("External facets for wall BCs:", wall_BC_indices, flush=True)
+    print("External facets tagged:", external_facet_indices)
+    print("Number of external facets:", len(external_facet_indices))
+    print("Internal facets tagged:", internal_facet_indices)
+    print("Number of internal facets:", len(internal_facet_indices))
 
-    # Remove external facets from facet_indices and facet_values
-    sorted_facets = np.argsort(facet_indices)
-    velocity_facets = dfx.mesh.meshtags(mesh, fdim, facet_indices[sorted_facets], facet_values[sorted_facets])
-    facet_indices = np.setdiff1d(facet_indices, wall_BC_indices)
-    facet_values = np.setdiff1d(facet_values, wall_BC_markers)
-    print("Internal facets after removing wall BCs:", facet_indices, flush=True)
+    return internal_tags, external_tags
 
-    # Save both meshtags for visualization
-    total_values = np.hstack(total_values).astype(np.int32)
-    total_facets = np.hstack(total_facets).astype(np.int32)
-    sorted_facets = np.argsort(total_facets)
-    print("Total facets:", total_facets[sorted_facets], flush=True)
-
-    # Write mesh and tags to output files
-    if mesh.comm.rank == 0:
-        out_str = './output/mesh_tags.xdmf'
-        with XDMFFile(mesh.comm, out_str, 'w') as xdmf_out:
-            xdmf_out.write_mesh(mesh)
-            mesh.topology.create_connectivity(fdim, tdim)
-            xdmf_out.write_meshtags(
-                dfx.mesh.meshtags(mesh, fdim, total_facets[sorted_facets], total_values[sorted_facets]),
-                mesh.geometry
-            )
-
-    return internal_tags, external_tags, velocity_facets, u_vec_rescaled
 
 def single_compartment(self, mesh, velocity_facets, M, W, p):
     Q_bio = 0.05  # given from Qterm in 1D sim
@@ -217,14 +247,13 @@ class PerfusionSolver:
         self.D_value = 1e-2
         self.element_degree = 1
         self.write_output = True
-        # self.u_vec, self.p_out, self.outlet_coords = branch_mesh_tagging()
-        self.mesh, self.vertex_tags = import_mesh(mesh_tag_file)
-        self.velocity, self.pressure = import_function(self.mesh, velocity_file, pressure_file)
-        self.internal_tags, self.external_tags, self.velocity_facets, self.u_vec = convert_vertex_tags_to_facet_tags(self.mesh, self.vertex_tags, self.u_vec)
+        self.mesh, self.mesh_tags = import_mesh(mesh_tag_file)
+        self.internal_tags, self.external_tags = separate_tags(self.mesh, self.mesh_tags)
+        self.velocity, self.pressure, self.outlet_coords, self.mesh1dtags, self.internal_1dtags, self.external_1dtags = import_function(velocity_file, pressure_file, self.mesh, self.internal_tags, self.external_tags)
 
         self.t = 0
         self.dt = 1  # Time step size, can be adjusted as needed
-        self.T = 10  # Total simulation time, can be adjusted as needed
+        self.T = len(self.velocity)  # Total simulation time, can be adjusted as needed
 
     def setup(self):
         ''' Setup the solver. '''
@@ -258,13 +287,13 @@ class PerfusionSolver:
 
         # Velocity boundary conditions
         self.bc_velocity = dfx.fem.Function(V)
-        self.bc_velocity.x.array[:] = 1.0  # Initialize to one
-        values = self.u_vec[10] # assume last timestep for now
+        self.bc_velocity.x.array[:] = 0.0  # Initialize to zero
+        values = self.velocity[250] # assume last timestep for now
         print("Original values:", values, flush=True)
         flat_values = values.flatten()  # Shape: (78,)
         print("Flat values for velocity BCs:", flat_values, flush=True)
 
-        outlet_facets = self.velocity_facets.find(OUTLET)  # Tag 1 is the outlets of the branched network
+        outlet_facets = self.mesh_tags.find(OUTLET)  # Tag 1 is the outlets of the branched network
         dofs_branch = dfx.fem.locate_dofs_topological((M.sub(1), V), fdim, outlet_facets)
         print("Shape of dofs for branch outlets:", len(dofs_branch[0]), flush=True)
 
@@ -281,13 +310,14 @@ class PerfusionSolver:
         # Wall boundary conditions
         self.mesh.topology.create_connectivity(self.mesh.topology.dim - 1, self.mesh.topology.dim)
         self.bc_wall = dfx.fem.Function(W)
-        self.bc_wall.x.array[:] = 1.0  # Set wall BC to zero
+        self.bc_wall.x.array[:] = 0.0  # Set wall BC to zero
 
         # Pressure outlet boundary conditions
         self.bc_outlet = dfx.fem.Function(W)
         self.bc_outlet.x.array[:] = 0.0  # Initialize to zero, length = number of cells
         # Set the outlet pressure based on the 1D NS simulation
         pressure_outlets = self.internal_tags.find(OUTLET)
+        print("Pressure outlet facets:", pressure_outlets, flush=True)
 
         facet_to_cell = self.mesh.topology.connectivity(fdim, self.mesh.topology.dim)
         adjacent_cells = []
@@ -313,10 +343,14 @@ class PerfusionSolver:
 
             closest_cells.append(closest_cell)
 
-        self.bc_outlet.x.array[closest_cells] = self.p_out[10, :] # Use last timestep for now
-        print("Outlet pressures:", self.p_out[10, :], flush=True)
+        print("Closest cells to outlet:", len(closest_cells), flush=True)
+        facets_1d = self.internal_1dtags
+        print("Facets on outlet:", facets_1d, flush=True)
+    
+        self.bc_outlet.x.array[closest_cells] = self.pressure[250][facets_1d] # Use last timestep for now
+        print("Outlet pressures:", self.pressure[250][facets_1d], flush=True)
 
-        fRHS, fLHS = single_compartment(self, self.mesh, self.velocity_facets, M, W, p) # Source and sink terms
+        fRHS, fLHS = single_compartment(self, self.mesh, self.mesh_tags, M, W, p) # Source and sink terms
 
         a = inner(u, w) * dx + inner(p, div(w)) * dx + inner(div(u), v) * dx + inner(fLHS, v) * dx
         L = -inner(fRHS, v) * dx
@@ -375,7 +409,7 @@ class PerfusionSolver:
 
 if __name__ == "__main__":
     # Example usage
-    mesh_tag_file = "../geometry/tagged_branches.xdmf"
+    mesh_tag_file = "../geometry/mesh_tags.xdmf"
     vel_file = "../geometry/velocity_checkpoint.bp"
     pressure_file = "../geometry/pressure_checkpoint.bp"
     solver = PerfusionSolver(mesh_tag_file, vel_file, pressure_file)

@@ -26,6 +26,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 WALL = 0
 OUTLET = 1
+OUTFLOW = 2
 
 """
     From the DOLFINx tutorial: Mixed formulation of the Poisson equation
@@ -193,8 +194,19 @@ def separate_tags(mesh, meshtags):
     internal_facet_indices = facet_indices[~is_boundary_facet]
     internal_facet_values  = facet_values[~is_boundary_facet]
 
+    # Outlet boundary conditions
+    # def outflow(x):   return np.isclose(x[1], -0.41)
+    # outflow_pressure_facets = dfx.mesh.locate_entities_boundary(mesh, fdim, outflow)
+    external_facet_indices = np.concatenate((external_facet_indices, boundary_facets))
+    external_facet_values = np.append(external_facet_values, np.full_like(boundary_facets, OUTLET))
+
+    external_facet_indices = np.hstack(external_facet_indices).astype(np.int32)
+    external_facet_values = np.hstack(external_facet_values).astype(np.int32)
+
+    sorted_facets = np.argsort(external_facet_indices)
+
     # Create MeshTags
-    external_tags = dfx.mesh.meshtags(mesh, fdim, external_facet_indices, external_facet_values)
+    external_tags = dfx.mesh.meshtags(mesh, fdim, external_facet_indices[sorted_facets], external_facet_values[sorted_facets])
     internal_tags = dfx.mesh.meshtags(mesh, fdim, internal_facet_indices, internal_facet_values)
 
     print("External facets tagged:", external_facet_indices)
@@ -216,7 +228,7 @@ def single_compartment(self, mesh, velocity_facets, M, W, p):
     V_bio = dfx.fem.assemble_scalar(volume_form)  # Assemble integral of v
     print(f"Mesh volume: {V_bio}", flush=True) # Volume of the bioreactor
 
-    Pcap = 15  # Capillary pressure
+    Pcap = 15*1333.22  # Capillary pressure, converted to dyne/cm^2
     Psnk = 0  # Sink pressure
 
     # Spatial average of source pressure:
@@ -224,7 +236,7 @@ def single_compartment(self, mesh, velocity_facets, M, W, p):
     outlet_facets = velocity_facets.find(OUTLET)  # Tag 1 is the outlets of the branched network
     print(f"Outlet facets: {outlet_facets}", flush=True)
     # dofs_branch = dfx.fem.locate_dofs_topological((M.sub(0), W), fdim, outlet_facets)
-    Psrc = 60 # self.bc_outlet.x.array[dofs_branch]  # Get the values of the outlet BCs
+    Psrc = 20*1333.22 # self.bc_outlet.x.array[dofs_branch]  # Get the values of the outlet BCs
     print(f"Outlet pressures: {Psrc}", flush=True)
     Psrc_avg = np.mean(Psrc)  # Average pressure at the outlets
     print(f"Average pressure at outlets: {Psrc_avg}", flush=True)
@@ -278,12 +290,13 @@ class PerfusionSolver:
         dS = Measure("dS", domain=self.mesh, subdomain_data=self.internal_tags) # Internal facet integrals
         n = FacetNormal(self.mesh) # Normal vector to the facets
 
-        kappa = 2e-5
+        kappa = 2e-5 / 10 # convert from cm^2/(Pa s) to cm^2/(dyne s)
         mu = 1
         kappa_over_mu = fem.Constant(self.mesh, dfx.default_scalar_type(kappa/mu))
         phi = fem.Constant(self.mesh, dfx.default_scalar_type(0.1)) # Porosity of the medium, ranging from 0 to 1
         hf = ufl.CellDiameter(self.mesh) # Cell diameter
         nitsche = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(100.0)) # Nitsche parameter
+        nitsche_outflow = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(100000.0)) # Nitsche parameter
 
         # Velocity boundary conditions
         self.bc_velocity = dfx.fem.Function(V)
@@ -310,7 +323,7 @@ class PerfusionSolver:
         # Wall boundary conditions
         self.mesh.topology.create_connectivity(self.mesh.topology.dim - 1, self.mesh.topology.dim)
         self.bc_wall = dfx.fem.Function(W)
-        self.bc_wall.x.array[:] = 0.0  # Set wall BC to zero
+        self.bc_wall.x.array[:] = 0.0*1333.22  # Initialize to zero, length = number of cells
 
         # Pressure outlet boundary conditions
         self.bc_outlet = dfx.fem.Function(W)
@@ -347,19 +360,15 @@ class PerfusionSolver:
         facets_1d = self.internal_1dtags
         print("Facets on outlet:", facets_1d, flush=True)
     
-        self.bc_outlet.x.array[closest_cells] = self.pressure[250][facets_1d] # Use last timestep for now
+        self.bc_outlet.x.array[closest_cells] = self.pressure[250][facets_1d]*1333.22 # Use last timestep for now
         print("Outlet pressures:", self.pressure[250][facets_1d], flush=True)
 
         fRHS, fLHS = single_compartment(self, self.mesh, self.mesh_tags, M, W, p) # Source and sink terms
 
-        a = inner(u, w) * dx + inner(p, div(w)) * dx + inner(div(u), v) * dx + inner(fLHS, v) * dx
+        a = inner(u, w) * dx + inner(kappa_over_mu*p, div(w)) * dx + inner(div(u), v) * dx + inner(fLHS, v) * dx
         L = -inner(fRHS, v) * dx
 
         # Impose Nitsche boundary conditions
-        # Wall BC: might be working? commented out because it looks weird
-        # more consistent way of enforcing- else can include only last term
-        # a += (-dot(grad(p),n)*v - dot(grad(v),n)*p + nitsche /hf * p *v) * ds(WALL)
-        # L += (-dot(grad(v),n)*self.bc_wall + nitsche /hf * self.bc_wall * v) * ds(WALL)
 
         # # Outlet BC
         a += (-dot(grad(p),n)*v - dot(grad(v),n)*p + nitsche /hf * p *v)("+") * dS(OUTLET)  
@@ -367,6 +376,10 @@ class PerfusionSolver:
 
         L += (-dot(grad(v),n)*self.bc_outlet + nitsche /hf * self.bc_outlet * v)("+") * dS(OUTLET)  
         L += (-dot(grad(v),n)*self.bc_outlet + nitsche /hf * self.bc_outlet * v)("-") * dS(OUTLET)  
+
+        # Outflow BC
+        a += (-dot(grad(p),n)*v - dot(grad(v),n)*p + nitsche_outflow /hf * p *v) * ds(OUTFLOW)  
+        L += (-dot(grad(v),n)*self.bc_wall + nitsche_outflow /hf * self.bc_wall * v) * ds(OUTFLOW)  
 
         self.a = a
         self.L = L

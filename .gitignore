@@ -25,6 +25,7 @@ Miniconda3-latest-Linux-x86_64.sh
 /files/python/raksha/working_files/test_perfusion/out_mixed_poisson/
 /files/python/raksha/working_files/test_perfusion/.cache/
 /files/python/raksha/working_files/test_perfusion/out_darcy/
+*.bp/
 
 # Ignore cloned libraries
 /files/python/dolfinx-tutorial/

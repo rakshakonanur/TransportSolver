@@ -510,7 +510,7 @@ def import_branched_mesh(branching_data_file, geo_file="branched_network.geo", m
     geo_to_mesh_gmsh(geo_file=geo_file, msh_file=msh_file)
     convert_mesh(msh_file=msh_file, xdmf_file=xdmf_file)
     xdmf_to_dolfinx(xdmf_file=xdmf_file)
-    outlet_coords = generate_1d_files(xdmf_file=xdmf_file, output_dir="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/071725/Run5_25branches")
+    outlet_coords = generate_1d_files(xdmf_file=xdmf_file, output_dir="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/090425/Run2_50branches")
     return outlet_coords
 
 def create_bioreactor_mesh(stl_file, msh_file="bioreactor.msh", xdmf_file="bioreactor.xdmf", diric=None):
@@ -533,6 +533,6 @@ class Files():
 
 if __name__ == "__main__":
     perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/syntheticVasculature/files/geometry/cermRaksha_scaled.stl",
-                                branching_data_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/071725/Run5_25branches/1D_Input_Files/branchingData.csv")
+                                branching_data_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/090425/Run2_50branches/1D_Input_Files/branchingData.csv")
 
 

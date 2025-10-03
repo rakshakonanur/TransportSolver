@@ -52,7 +52,7 @@ def import_velocity(xdmf_file):
     velocity  =  mesh.GetPointData().GetArray("f")
     velocity_np = vtk_to_numpy(velocity)  # shape: (N, 3)
     print("Velocity shape:", velocity_np.shape)
-    return 1e-3*velocity_np
+    return velocity_np
     return velocity
 
 
@@ -137,27 +137,27 @@ def project_velocity(mesh, velocity):
     """
     Project the velocity onto the mesh.
     """
-    u_p2 = element("Lagrange", mesh.basix_cell(), 2, shape=(mesh.geometry.dim,))
-    u_p1 = element("Lagrange", mesh.basix_cell(), 1, shape=(mesh.geometry.dim,))
+    u_p2 = element("Lagrange", mesh.basix_cell(), 1, shape=(mesh.geometry.dim,))
+    # u_p1 = element("Lagrange", mesh.basix_cell(), 1, shape=(mesh.geometry.dim,))
 
-    # Define function spaces
-    W = dfx.fem.functionspace(mesh, u_p2) # lagrange function space
-    V = dfx.fem.functionspace(mesh, u_p1) # DG Velocity space
+    # # Define function spaces
+    # W = dfx.fem.functionspace(mesh, u_p2) # lagrange function space
+    # V = dfx.fem.functionspace(mesh, u_p1) # DG Velocity space
 
-    vel = dfx.fem.Function(V)  # Create a function in the DG space
-    # vel.x.array[:] = velocity.flatten()  # Set the velocity values
+    # vel = dfx.fem.Function(V)  # Create a function in the DG space
+    # # vel.x.array[:] = velocity.flatten()  # Set the velocity values
 
-    # Ensure velocity array matches the function layout
-    dofmap = V.dofmap
-    assert velocity.shape[0] == V.dofmap.index_map.size_local, (
-        f"Velocity shape mismatch: expected {V.dofmap.index_map.size_local}, got {velocity.shape[0]}"
-    )
+    # # Ensure velocity array matches the function layout
+    # dofmap = V.dofmap
+    # assert velocity.shape[0] == V.dofmap.index_map.size_local, (
+    #     f"Velocity shape mismatch: expected {V.dofmap.index_map.size_local}, got {velocity.shape[0]}"
+    # )
 
-    # Flatten in correct order (component-major)
-    vel.x.array[:] = velocity.reshape(-1)
+    # # Flatten in correct order (component-major)
+    # vel.x.array[:] = velocity.reshape(-1)
 
-    projector = Projector(W)
-    u_proj = projector(vel)  # Project the velocity onto the mesh
+    # projector = Projector(W)
+    # u_proj = projector(vel)  # Project the velocity onto the mesh
 
     #  Define function spaces
     W = dfx.fem.functionspace(mesh, u_p2) # lagrange function space
@@ -202,11 +202,11 @@ class Transport:
         """ Set up the problem. """
 
         # Simulation parameters
-        self.D_value = 1e-3
+        self.D_value = 1e-2
         self.k = 1 # Element degree
         self.t = 0 # Initial time
-        self.T = 50 # Final time
-        self.dt = 0.1 # Timestep size
+        self.T = 2.50 # Final time
+        self.dt = 0.01 # Timestep size
         self.num_timesteps = int(self.T / self.dt)
         self.n = ufl.FacetNormal(self.mesh)
         self.dx = ufl.Measure("dx", domain=self.mesh) # Cell integrals
@@ -214,7 +214,7 @@ class Transport:
         self.dS = ufl.Measure('dS', domain=self.mesh, subdomain_data=self.interior_tags) # Interior facet integrals
 
         # Function spaces
-        Pk_vec = element("Lagrange", self.mesh.basix_cell(), degree=2, shape=(self.mesh.geometry.dim,))
+        Pk_vec = element("Lagrange", self.mesh.basix_cell(), degree=1, shape=(self.mesh.geometry.dim,))
         V = dfx.fem.functionspace(self.mesh, Pk_vec) # function space for velocity
         self.u = dfx.fem.Function(V) # velocity
         Pk = element("Lagrange", self.mesh.basix_cell(), degree=1)

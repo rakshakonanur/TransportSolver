@@ -198,6 +198,7 @@ def separate_tags(mesh, meshtags):
     # def outflow(x):   return np.isclose(x[1], -0.41)
     # outflow_pressure_facets = dfx.mesh.locate_entities_boundary(mesh, fdim, outflow)
     external_facet_indices = np.concatenate((external_facet_indices, boundary_facets))
+    # external_facet_values = np.append(external_facet_values, np.full_like(boundary_facets, WALL))
     external_facet_values = np.append(external_facet_values, np.full_like(boundary_facets, OUTLET))
 
     external_facet_indices = np.hstack(external_facet_indices).astype(np.int32)
@@ -218,7 +219,7 @@ def separate_tags(mesh, meshtags):
 
 
 def single_compartment(self, mesh, velocity_facets, M, W, p):
-    Q_bio = 0.05  # given from Qterm in 1D sim
+    Q_bio = 0.05/60  # given from Qterm in 1D sim, convert to cm^3/s
 
     # Calculate volume of the bioreactor
     DG = element("DG", mesh.basix_cell(), 0)
@@ -296,25 +297,35 @@ class PerfusionSolver:
         phi = fem.Constant(self.mesh, dfx.default_scalar_type(0.1)) # Porosity of the medium, ranging from 0 to 1
         hf = ufl.CellDiameter(self.mesh) # Cell diameter
         nitsche = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(100.0)) # Nitsche parameter
-        nitsche_outflow = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(100000.0)) # Nitsche parameter
+        nitsche_outflow = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(10000.0)) # Nitsche parameter
 
         # Velocity boundary conditions
         self.bc_velocity = dfx.fem.Function(V)
         self.bc_velocity.x.array[:] = 0.0  # Initialize to zero
-        values = self.velocity[250] # assume last timestep for now
+        values = self.velocity[100] # assume last timestep for now
         print("Original values:", values, flush=True)
         flat_values = values.flatten()  # Shape: (78,)
-        print("Flat values for velocity BCs:", flat_values, flush=True)
+        print("Flat values for velocity BCs:", flat_values)
+        print("shape of flat values:", flat_values.shape, flush=True)
 
-        outlet_facets = self.mesh_tags.find(OUTLET)  # Tag 1 is the outlets of the branched network
-        dofs_branch = dfx.fem.locate_dofs_topological((M.sub(1), V), fdim, outlet_facets)
-        print("Shape of dofs for branch outlets:", len(dofs_branch[0]), flush=True)
+        # outlet_facets = self.mesh_tags.find(OUTLET)  # Tag 1 is the outlets of the branched network
+        # dofs_branch = dfx.fem.locate_dofs_topological((M.sub(1), V), fdim, outlet_facets) # for some reason this doesn't work
+        # print("Dofs for branch outlets:", dofs_branch, flush=True)
+        
+        # print("Shape of dofs for branch outlets:", len(dofs_branch[1]), flush=True)
 
-        for i, dof in enumerate(dofs_branch[0]):
-            self.bc_velocity.x.array[dof] = flat_values[i]
+        # for i, dof in enumerate(dofs_branch[1]):
+        #     self.bc_velocity.x.array[dof] = flat_values[i]
 
-        print("Nonzero values in velocity BC:", np.count_nonzero(self.bc_velocity.x.array), flush=True)
-        bcs = [dfx.fem.dirichletbc(self.bc_velocity, dofs_branch, M.sub(1))]
+        # dofs_branch = dfx.fem.locate_dofs_topological(V, fdim, outlet_facets)
+        # print("Shape of dofs for branch outlets:", len(dofs_branch), flush=True)
+
+        # for i, dof in enumerate(dofs_branch):
+        #     self.bc_velocity.x.array[dof] = flat_values[i]
+        # outlet_values = self.bc_velocity.x.array[dofs_branch[1]]
+        # print("Values set at outlet DOFs:", outlet_values)
+        # # print("Nonzero values in velocity BC:", np.count_nonzero(self.bc_velocity.x.array), flush=True)
+        # bcs = [dfx.fem.dirichletbc(self.bc_velocity, dofs_branch, M.sub(1))]
 
         # Pressure boundary conditions
         # To do this, first find the cells adjacent to the outlet vertices, and then impose
@@ -360,8 +371,8 @@ class PerfusionSolver:
         facets_1d = self.internal_1dtags
         print("Facets on outlet:", facets_1d, flush=True)
     
-        self.bc_outlet.x.array[closest_cells] = self.pressure[250][facets_1d]*1333.22 # Use last timestep for now
-        print("Outlet pressures:", self.pressure[250][facets_1d], flush=True)
+        self.bc_outlet.x.array[closest_cells] = self.pressure[100][facets_1d]*1333.22 # Use last timestep for now
+        print("Outlet pressures:", self.pressure[100][facets_1d], flush=True)
 
         fRHS, fLHS = single_compartment(self, self.mesh, self.mesh_tags, M, W, p) # Source and sink terms
 
@@ -378,13 +389,14 @@ class PerfusionSolver:
         L += (-dot(grad(v),n)*self.bc_outlet + nitsche /hf * self.bc_outlet * v)("-") * dS(OUTLET)  
 
         # Outflow BC
-        a += (-dot(grad(p),n)*v - dot(grad(v),n)*p + nitsche_outflow /hf * p *v) * ds(OUTFLOW)  
-        L += (-dot(grad(v),n)*self.bc_wall + nitsche_outflow /hf * self.bc_wall * v) * ds(OUTFLOW)  
+        a += (-dot(grad(p),n)*v - dot(grad(v),n)*p + nitsche /hf * p *v) * ds(WALL)  
+        L += (-dot(grad(v),n)*self.bc_wall + nitsche /hf * self.bc_wall * v) * ds(WALL)  
 
         self.a = a
         self.L = L
 
         # Apply Dirichlet BCs
+        bcs = []
         self.bcs = bcs
         problem = LinearProblem(self.a, self.L, bcs=self.bcs, petsc_options={"ksp_type": "preonly", "pc_type": "lu", "pc_factor_mat_solver_type": "mumps"})
 

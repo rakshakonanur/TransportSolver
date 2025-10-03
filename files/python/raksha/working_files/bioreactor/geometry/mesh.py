@@ -366,6 +366,10 @@ def load_vtp(directory):
     pressure = []  # initialize as a list
 
     for file in vtp_files:
+        if file.endswith("centerlines.vtp"):
+            continue
+        if file.endswith("1d_model.vtp"):
+            continue
         print(f"Reading: {file}")
         reader = vtk.vtkXMLPolyDataReader()
         reader.SetFileName(file)
@@ -510,7 +514,7 @@ def import_branched_mesh(branching_data_file, geo_file="branched_network.geo", m
     geo_to_mesh_gmsh(geo_file=geo_file, msh_file=msh_file)
     convert_mesh(msh_file=msh_file, xdmf_file=xdmf_file)
     xdmf_to_dolfinx(xdmf_file=xdmf_file)
-    outlet_coords = generate_1d_files(xdmf_file=xdmf_file, output_dir="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/090425/Run2_50branches")
+    outlet_coords = generate_1d_files(xdmf_file=xdmf_file, output_dir="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/091725/Run10_50branches/1D_Input_Files/inlet")
     return outlet_coords
 
 def create_bioreactor_mesh(stl_file, msh_file="bioreactor.msh", xdmf_file="bioreactor.xdmf", diric=None):
@@ -532,7 +536,9 @@ class Files():
 
 
 if __name__ == "__main__":
-    perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/syntheticVasculature/files/geometry/cermRaksha_scaled.stl",
-                                branching_data_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/090425/Run2_50branches/1D_Input_Files/branchingData.csv")
+    # perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/syntheticVasculature/files/geometry/cermRaksha_scaled.stl",
+    #                             branching_data_file="/Users/rakshakonanur/Documents/Research/Synthetic_Vasculature/output/1D_Output/090425/Run2_50branches/1D_Input_Files/branchingData.csv")
+    perfusion = Files(stl_file="/Users/rakshakonanur/Documents/Research/vascularize/files/geometry/cermRaksha_scaled_big.stl",
+                                branching_data_file="/Users/rakshakonanur/Documents/Research/vascularize/output/Forest_Output/1D_Output/091725/Run10_50branches/branchingData_0.csv")
 
 
